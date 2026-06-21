@@ -1,0 +1,41 @@
+/* ============================================================
+ * 马刀游戏 公共样式 (common.css)
+ * 包含所有页面共用的规则弹窗样式（浅色主题 + 暗色主题适配）
+ * ============================================================ */
+
+/* ===== 规则弹窗样式（浅色主题，适用于 index/lobby/guess/waiting/action） ===== */
+.rules-container {
+    position: fixed; top: 15px; right: 20px; z-index: 1000;
+}
+
+.rules-btn {
+    padding: 8px 16px; background: #3498db; color: white; border: none;
+    border-radius: 6px; cursor: pointer; font-size: 14px;
+}
+
+.rules-popup {
+    display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
+    width: max-content; max-width: 90vw;
+    max-height: 24em; overflow-y: auto;
+    background: #fff; border: 2px solid #3498db;
+    border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    padding: 15px; font-size: 13px; line-height: 1.6; color: #333;
+    text-align: left;
+    white-space: normal; overflow-wrap: break-word;
+}
+
+.rules-popup.show { display: block; }
+
+.rules-title {
+    text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px;
+}
+
+.rules-popup p { margin: 4px 0; }
+
+/* ===== 规则弹窗样式（暗色主题，适用于 spectate/result） ===== */
+body.dark-theme .rules-popup {
+    background: #222; border: 2px solid #ffd700;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6); color: #eee;
+}
+
+body.dark-theme .rules-title { color: #ffd700; }

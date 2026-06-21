@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!--
+  文件名: guess.html
+  作用: 猜拳页面 — 玩家选择石头/剪刀/布，AJAX 提交并轮询等待所有玩家完成猜拳
+  路由: GET /game/{roomId}/{playerId}?phase=GUESS  (由 GameController.game() 根据游戏阶段返回)
+  页面功能:
+    1. 实时展示所有玩家状态卡片（昵称、HP、装备、位置、步数、血祭buff）
+    2. 猜拳按钮区（石头✊、剪刀✌️、布✋），通过 AJAX POST 提交手势
+    3. 已出拳后自动切换到等待状态，显示未出拳玩家列表
+    4. 每2秒 AJAX 轮询房间状态（/api/room/{roomId}?playerId={playerId}）
+    5. 操作记录实时更新（自动滚动到底部）
+    6. 聊天功能（发送消息 + 实时显示）
+    7. 游戏结束/玩家死亡时自动跳转
+    8. 所有玩家出拳完毕 → phase 变为 ACTION → 自动跳转到行动页面
+    9. 规则弹窗状态通过 sessionStorage 保持（页面刷新不丢失）
+-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>马刀游戏 - 猜拳</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .status-box { border: 1px solid #ccc; margin-bottom: 20px; background: #f9f9f9; }
+        .status-box h4 { margin: 0; padding: 10px; background: #eee; border-bottom: 1px solid #ddd; }
+        .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }
+        .player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; }
+        .player-card.current { border-color: #3498db; background: #eaf4ff; }
+        .player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; }
+        .player-card p { margin: 3px 0; }
+        .blood-buff { color: red; font-weight: bold; }
+        .gesture-form { margin: 20px 0; }
+        .gesture-form button { font-size: 20px; padding: 10px 20px; margin-right: 10px; cursor: pointer; }
+        .log-box { border: 1px solid #ccc; margin-top: 30px; background: #f9f9f9; }
+        .log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+        .log-scroll { max-height: 200px; overflow-y: auto; }
+        .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
+        .log-scroll li { margin: 3px 0; }
+        .chat-box { border: 1px solid #ccc; margin-top: 20px; background: #f9f9f9; }
+        .chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+        .chat-scroll { max-height: 150px; overflow-y: auto; }
+        .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
+        .chat-scroll li { margin: 3px 0; }
+        .chat-form { padding: 10px; display: flex; gap: 5px; }
+        #waitMessage { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- ========== 规则弹窗（通过 sessionStorage 保持状态，AJAX 刷新不丢失） ========== -->
+<div class="rules-container">
+    <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <div class="rules-popup" id="rulesPopup">
+        <div class="rules-title">马刀游戏规则</div>
+        <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
+        <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
+        <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
+        <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
+        <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
+        <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
+        <p>马：只能在城内使用，当有其它玩家与你在同一个城内时，可以消耗一次步数，将他踢到城外（踢出去）</p>
+        <p>同时他会减少3点生命值。</p>
+        <p>刀：可以在城内或城外使用，当有其它玩家与你在同一个区域时，可以消耗一次步数，刺他一刀，他会减少1点生命值。</p>
+        <p>血祭：消耗一次步数，生命值减至一半，向上取整（1点生命值时无法血祭），下一次的攻击翻2倍（可跨回合）不可叠加。</p>
+        <p>撵进去：当你与其它玩家在城外时，可以消耗一次步数，将其中一个玩家撵入一个城内。</p>
+    </div>
+</div>
+
+<!-- ========== 玩家状态区 ========== -->
+<!-- 通过 JS updatePlayers() 动态渲染所有玩家卡片 -->
+<div class="status-box">
+    <h4>📋 玩家状态</h4>
+    <div class="players-container" id="playersContainer">
+        <p>加载中...</p>
+    </div>
+</div>
+
+<!-- ========== 猜拳操作区 ========== -->
+<!-- 初始显示，已出拳后隐藏 -->
+<div id="guessArea">
+    <h2>请出拳：</h2>
+    <div class="gesture-form">
+        <!--
+          三个猜拳按钮，通过 data-gesture 属性标记手势类型
+          JS 通过 getAttribute('data-gesture') 读取，提交到 /api/guess/{roomId}/{playerId}
+          手势对应:
+            - data-gesture="石头": 赢剪刀，输布
+            - data-gesture="剪刀": 赢布，输石头
+            - data-gesture="布": 赢石头，输剪刀
+        -->
+        <button data-gesture="石头">✊ 石头</button>
+        <button data-gesture="剪刀">✌️ 剪刀</button>
+        <button data-gesture="布">✋ 布</button>
+    </div>
+</div>
+
+<!-- ========== 等待区 ========== -->
+<!-- 默认隐藏，玩家已出拳后显示，每2秒轮询更新未出拳玩家列表 -->
+<div id="waitMessage">
+    <h2>等待其他玩家猜拳...</h2>
+    <div id="waitDetail"></div>
+</div>
+
+<!-- ========== 操作记录 ========== -->
+<div class="log-box">
+    <h4>📜 操作记录</h4>
+    <div class="log-scroll" id="logScroll">
+        <ul id="logList"></ul>
+    </div>
+</div>
+
+<!-- ========== 聊天区域 ========== -->
+<div class="chat-box">
+    <h4>💬 聊天</h4>
+    <div class="chat-scroll" id="chatScroll">
+        <ul id="chatList"></ul>
+    </div>
+    <!--
+      聊天表单
+      参数:
+        - chatInput: 文本输入框，autocomplete="off" 防止浏览器自动填充
+        - 提交事件: 通过 addEventListener('submit') 拦截，AJAX POST 发送
+      对应后端: POST /api/chat/{roomId}/{playerId}
+    -->
+    <form id="chatForm" class="chat-form">
+        <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
+        <button type="submit">发送</button>
+    </form>
+</div>
+
+<!-- ========== 核心交互脚本 ========== -->
+<script th:inline="javascript" src="/js/common.js"></script>
+<script th:inline="javascript">
+    var roomId = /*[[${roomId}]]*/ '';
+    var playerId = /*[[${playerId}]]*/ '';
+    var RULES_KEY = 'rulesPopupVisible_' + roomId;
+
+    // ===== AJAX 状态刷新 =====
+    async function fetchState() {
+        try {
+            var url = '/api/room/' + roomId + '?playerId=' + playerId;
+            var res = await fetch(url);
+            if (!res.ok) return;
+            var data = await res.json();
+            if (!data.status) { window.location.href = '/'; return; }
+
+            updatePlayers(data.players);
+            updateLogs(data.actionLogs);
+            updateChat(data.chatMessages);
+
+            if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; return; }
+            if (!data.currentPlayerAlive) { window.location.href = '/game/' + roomId + '/' + playerId; return; }
+
+            if (data.phase === 'GUESS') {
+                if (data.currentPlayerGuess == null) {
+                    document.getElementById('guessArea').style.display = 'block';
+                    document.getElementById('waitMessage').style.display = 'none';
+                } else {
+                    document.getElementById('guessArea').style.display = 'none';
+                    document.getElementById('waitMessage').style.display = 'block';
+                    var detailDiv = document.getElementById('waitDetail');
+                    if (data.playersNotGuessed && data.playersNotGuessed.length > 0) {
+                        var items = data.playersNotGuessed.map(function(n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('');
+                        detailDiv.innerHTML = '<p>等待以下玩家出拳：</p><ul>' + items + '</ul>';
+                    } else {
+                        detailDiv.innerHTML = '';
+                    }
+                }
+            } else if (data.phase === 'ACTION') {
+                window.location.href = '/game/' + roomId + '/' + playerId;
+            }
+
+            restoreRulesPopup();
+        } catch (e) { console.error('状态刷新失败', e); }
+    }
+
+    // ===== 猜拳提交 =====
+    var gestureButtons = document.querySelectorAll('.gesture-form button');
+    gestureButtons.forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+            var gesture = this.getAttribute('data-gesture');
+            var formData = new FormData();
+            formData.append('gesture', gesture);
+            try {
+                await fetch('/api/guess/' + roomId + '/' + playerId, { method: 'POST', body: formData });
+                fetchState();
+            } catch (e) { console.error('猜拳提交失败', e); }
+        });
+    });
+
+    // ===== 聊天发送（使用 common.js 中的 initChatForm） =====
+    initChatForm();
+
+    // ===== 定时刷新 =====
+    restoreRulesPopup();
+    fetchState();
+    setInterval(fetchState, 2000);
+</script>
+</body>
+</html>

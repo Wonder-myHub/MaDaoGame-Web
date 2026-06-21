@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+  文件名: index.html
+  作用: 游戏首页 — 提供"创建房间"和"加入房间"两个入口表单，以及游戏规则弹窗
+  路由: GET /  (由 GameController.index() 返回)
+  页面功能:
+    1. 创建房间表单 — 输入昵称+玩家数量(2~6人)，POST /create
+    2. 加入房间表单 — 输入房间ID+昵称，POST /join
+    3. 规则弹窗 — 点击右上角"规则"按钮弹出，点击外部关闭
+    4. 错误提示 — 通过 Thymeleaf th:if 条件渲染，由后端重定向时附带 error 参数显示
+-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>马刀游戏 - 首页</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; }
+        .form-section { margin-bottom: 30px; }
+        .form-section h2 { color: #34495e; font-size: 20px; margin-bottom: 15px; }
+        .form-section input, .form-section button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; font-size: 14px; }
+        .form-section button { background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        .form-section button:hover { background: #2980b9; }
+        .error { color: red; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+<!-- ========== 规则弹窗区域 ========== -->
+<!-- 固定在页面右上角，不受页面滚动影响 -->
+<div class="rules-container">
+    <!-- 规则触发按钮，点击调用 toggleRules() 切换弹窗显隐 -->
+    <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <!-- 规则内容弹窗，初始隐藏（display:none），通过 .show 类控制显示 -->
+    <div class="rules-popup" id="rulesPopup">
+        <div class="rules-title">马刀游戏规则</div>
+        <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
+        <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
+        <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
+        <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
+        <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
+        <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
+        <p>马：只能在城内使用，当有其它玩家与你在同一个城内时，可以消耗一次步数，将他踢到城外（踢出去）</p>
+        <p>同时他会减少3点生命值。</p>
+        <p>刀：可以在城内或城外使用，当有其它玩家与你在同一个区域时，可以消耗一次步数，刺他一刀，他会减少1点生命值。</p>
+        <p>血祭：消耗一次步数，生命值减至一半，向上取整（1点生命值时无法血祭），下一次的攻击翻2倍（可跨回合）不可叠加。</p>
+        <p>撵进去：当你与其它玩家在城外时，可以消耗一次步数，将其中一个玩家撵入一个城内。</p>
+    </div>
+</div>
+
+<!-- ========== 主内容区：创建房间 + 加入房间 ========== -->
+<div class="container">
+    <h1>⚔️ 马刀游戏</h1>
+
+    <!--
+      Thymeleaf 条件渲染：仅当后端传入了 error 属性时才显示错误信息
+      参数说明:
+        - ${error}: String 类型，由 Controller 通过 Model.addAttribute("error", msg) 传入
+          典型场景：房间不存在时 Controller 重定向到 /?error=房间不存在
+          对应 Controller: GameController.index() 接收 @RequestParam(required=false) String error
+      渲染逻辑:
+        - th:if="${error}": error 非 null 且非空时渲染此 div
+        - th:text="${error}": 将 error 值设置为 div 的文本内容
+        - class="error": 红色文字样式
+    -->
+    <div th:if="${error}" class="error" th:text="${error}"></div>
+
+    <!-- ===== 创建房间表单 ===== -->
+    <!--
+      提交到 POST /create，由 GameController.createRoom() 处理
+      表单参数:
+        - name (String, required): 玩家昵称，用于在游戏中显示
+          后端绑定: @RequestParam String name → 创建 Player 对象时设置 name 字段
+        - count (int, required, min=2, max=6): 目标玩家数量
+          后端绑定: @RequestParam int count → 创建 GameRoom 时设置 playerCount 字段
+          HTML 限制: min="2" max="6" 浏览器端校验，默认值 value="2"
+      成功后重定向: /lobby/{roomId}/{playerId}
+      失败后重定向: /?error=错误信息
+    -->
+    <div class="form-section">
+        <h2>创建房间</h2>
+        <form th:action="@{/create}" method="post">
+            <input type="text" name="name" placeholder="你的昵称" required>
+            <input type="number" name="count" min="2" max="6" value="2" placeholder="玩家数量" required>
+            <button type="submit">创建并加入</button>
+        </form>
+    </div>
+
+    <!-- ===== 加入房间表单 ===== -->
+    <!--
+      提交到 POST /join，由 GameController.joinRoom() 处理
+      表单参数:
+        - roomId (String, required): 要加入的房间ID，由房主从等待大厅复制分享
+          后端绑定: @RequestParam String roomId → 调用 GameService 查找对应 GameRoom
+          校验: 如果房间不存在或已满，重定向回 /?error=...
+        - name (String, required): 玩家昵称，用于在游戏中显示
+          后端绑定: @RequestParam String name → 创建 Player 对象时设置 name 字段
+      成功后重定向: /lobby/{roomId}/{playerId}
+      失败后重定向: /?error=错误信息（如"房间不存在"、"房间已满"）
+    -->
+    <div class="form-section">
+        <h2>加入房间</h2>
+        <form th:action="@{/join}" method="post">
+            <input type="text" name="roomId" placeholder="房间 ID" required>
+            <input type="text" name="name" placeholder="你的昵称" required>
+            <button type="submit">加入</button>
+        </form>
+    </div>
+</div>
+
+<!-- ========== 规则弹窗交互脚本 ========== -->
+<script>
+    var RULES_KEY = 'rulesPopupVisible_index';
+    function toggleRules() {
+        var popup = document.getElementById('rulesPopup');
+        popup.classList.toggle('show');
+        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
+    }
+    (function() {
+        var popup = document.getElementById('rulesPopup');
+        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
+            popup.classList.add('show');
+        }
+    })();
+    window.addEventListener('click', function(e) {
+        var container = document.querySelector('.rules-container');
+        if (!container.contains(e.target)) {
+            document.getElementById('rulesPopup').classList.remove('show');
+            sessionStorage.setItem(RULES_KEY, false);
+        }
+    });
+</script>
+</body>
+</html>
