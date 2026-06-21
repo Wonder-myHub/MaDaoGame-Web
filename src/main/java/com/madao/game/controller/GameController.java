@@ -468,7 +468,8 @@ public class GameController {
                 room.addChatMessage(player.getName() + "：" + message.trim());
             }
         }
-        return gameService.getRoom(roomId).getChatMessages(); // 返回完整聊天历史
+        GameRoom room = gameService.getRoom(roomId);
+        return room != null ? room.getChatMessages() : Collections.emptyList(); // 返回完整聊天历史
     }
 
     /**

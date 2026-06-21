@@ -31,13 +31,22 @@ function escapeHtml(str) {
 // ========== 规则弹窗控制 ==========
 
 /**
+ * 获取 sessionStorage 中规则弹窗状态的键名。
+ * 基于 roomId 区分不同房间的弹窗状态，避免多房间冲突。
+ * @returns {string} sessionStorage 键名
+ */
+function rulesKey() {
+    return 'rulesPopupVisible_' + (typeof roomId !== 'undefined' ? roomId : 'global');
+}
+
+/**
  * 切换规则弹窗的显示/隐藏状态
  * 使用 sessionStorage 持久化状态，页面刷新后不丢失
  */
 function toggleRules() {
     var popup = document.getElementById('rulesPopup');
     popup.classList.toggle('show');
-    sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
+    sessionStorage.setItem(rulesKey(), popup.classList.contains('show'));
 }
 
 /**
@@ -46,7 +55,7 @@ function toggleRules() {
  */
 function restoreRulesPopup() {
     var popup = document.getElementById('rulesPopup');
-    if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
+    if (popup && sessionStorage.getItem(rulesKey()) === 'true') {
         popup.classList.add('show');
     }
 }
@@ -57,7 +66,7 @@ window.addEventListener('click', function(e) {
     if (!container.contains(e.target)) {
         var popup = document.getElementById('rulesPopup');
         popup.classList.remove('show');
-        sessionStorage.setItem(RULES_KEY, false);
+        sessionStorage.setItem(rulesKey(), false);
     }
 });
 

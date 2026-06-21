@@ -99,27 +99,6 @@
 <script th:inline="javascript">
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
-    var RULES_KEY = 'rulesPopupVisible_lobby_' + roomId;
-
-    // ===== 规则弹窗 =====
-    function toggleRules() {
-        var popup = document.getElementById('rulesPopup');
-        popup.classList.toggle('show');
-        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
-    }
-    (function() {
-        var popup = document.getElementById('rulesPopup');
-        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
-            popup.classList.add('show');
-        }
-    })();
-    window.addEventListener('click', function(e) {
-        var container = document.querySelector('.rules-container');
-        if (!container.contains(e.target)) {
-            document.getElementById('rulesPopup').classList.remove('show');
-            sessionStorage.setItem(RULES_KEY, false);
-        }
-    });
 
     // ===== 复制房间ID（使用 Clipboard API） =====
     document.getElementById('copyBtn').addEventListener('click', function() {
@@ -178,10 +157,12 @@
                 listHtml += '<li>' + escapeHtml(p.name) + (p.id === playerId ? '（我）' : '') + '</li>';
             }
             document.getElementById('playersList').innerHTML = listHtml;
+            restoreRulesPopup();
         } catch (e) { console.error('轮询失败', e); }
     }
 
     pollState();
+    restoreRulesPopup();
     setInterval(pollState, 3000);
 </script>
 </body>
