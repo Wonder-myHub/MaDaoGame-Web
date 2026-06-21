@@ -1,29 +1,136 @@
 <!DOCTYPE html>
+<!--
+  文件名: index.html
+  作用: 游戏首页 — 提供"创建房间"和"加入房间"两个入口表单，以及游戏规则弹窗
+  路由: GET /  (由 GameController.index() 返回)
+  页面功能:
+    1. 创建房间表单 — 输入昵称+玩家数量(2~6人)，POST /create
+    2. 加入房间表单 — 输入房间ID+昵称，POST /join
+    3. 规则弹窗 — 点击右上角"规则"按钮弹出，点击外部关闭
+    4. 错误提示 — 通过 Thymeleaf th:if 条件渲染，由后端重定向时附带 error 参数显示
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <title>马刀游戏 - 首页</title>
     <style>
+        /* ========== 页面基础布局 ========== */
+        /*
+         * body:
+         *   font-family: Arial, sans-serif — 字体族，优先Arial，降级sans-serif
+         *   margin: 20px — 页面四周留白20px
+         *   background: #f5f5f5 — 浅灰色背景
+         */
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        /*
+         * .container: 居中白色卡片容器
+         *   max-width: 500px — 最大宽度500px，避免在大屏幕上过宽
+         *   margin: 0 auto — 上下0、左右auto实现水平居中
+         *   background: white — 白色背景卡片
+         *   padding: 30px — 卡片内边距30px
+         *   border-radius: 12px — 圆角12px
+         *   box-shadow: 0 4px 10px rgba(0,0,0,0.1) — 阴影偏移(0,4px)、模糊10px、10%透明度黑色
+         */
         .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        /*
+         * h1:
+         *   text-align: center — 文字居中
+         *   color: #2c3e50 — 深蓝灰色标题
+         */
         h1 { text-align: center; color: #2c3e50; }
+
+        /* ========== 表单区块样式 ========== */
+        /*
+         * .form-section:
+         *   margin-bottom: 30px — 表单区块底部间距30px
+         */
         .form-section { margin-bottom: 30px; }
+        /*
+         * .form-section h2:
+         *   color: #34495e — 深灰蓝色标题
+         *   font-size: 20px — 字体大小20px
+         *   margin-bottom: 15px — 标题底部间距15px
+         */
         .form-section h2 { color: #34495e; font-size: 20px; margin-bottom: 15px; }
+        /*
+         * 输入框和按钮统一样式，占满宽度
+         *   padding: 10px — 内边距10px（上下左右统一）
+         *   margin: 5px 0 — 上下5px、左右0的间距
+         *   width: 100% — 宽度占满父容器
+         *   box-sizing: border-box — padding/border 计入总宽度，避免溢出
+         *   font-size: 14px — 字体大小14px
+         */
         .form-section input, .form-section button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; font-size: 14px; }
+        /*
+         * .form-section button:
+         *   background: #3498db — 蓝色背景
+         *   color: white — 白色文字
+         *   border: none — 无边框
+         *   border-radius: 6px — 圆角6px
+         *   cursor: pointer — 鼠标悬停时显示手型
+         */
         .form-section button { background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        /* hover 状态：背景变为深蓝色 #2980b9 */
         .form-section button:hover { background: #2980b9; }
+
+        /* ========== 错误提示样式（Thymeleaf th:if 条件渲染时使用） ========== */
+        /*
+         * .error:
+         *   color: red — 红色文字
+         *   margin-bottom: 15px — 底部间距15px
+         */
         .error { color: red; margin-bottom: 15px; }
 
-        /* 规则按钮（最终正确样式） */
+        /* ========== 规则弹窗样式 ========== */
+        /*
+         * .rules-container: 规则按钮固定定位在右上角
+         *   position: fixed — 固定定位，不受页面滚动影响
+         *   top: 15px — 距顶部15px
+         *   right: 20px — 距右侧20px
+         *   z-index: 1000 — 层级1000，确保在最上层
+         */
         .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+        /*
+         * .rules-btn:
+         *   padding: 8px 16px — 上下8px、左右16px的内边距
+         *   background: #3498db — 蓝色背景
+         *   color: white — 白色文字
+         *   border: none — 无边框
+         *   border-radius: 6px — 圆角6px
+         *   cursor: pointer — 鼠标手型
+         *   font-size: 14px — 字体大小14px
+         */
         .rules-btn {
             padding: 8px 16px; background: #3498db; color: white; border: none;
             border-radius: 6px; cursor: pointer; font-size: 14px;
         }
+        /*
+         * .rules-popup: 弹窗默认隐藏，显示时添加 .show 类
+         *   display: none — 默认隐藏
+         *   position: absolute — 相对 .rules-container 绝对定位
+         *   right: 0 — 右对齐父容器
+         *   top: 100% — 位于按钮正下方
+         *   margin-top: 5px — 与按钮间距5px
+         *   width: max-content — 根据内容自动撑开宽度
+         *   max-width: 90vw — 最大宽度不超过视口宽度的90%
+         *   max-height: 24em — 最大高度约24行文字
+         *   overflow-y: auto — 内容超出最大高度时显示垂直滚动条
+         *   background: #fff — 白色背景
+         *   border: 2px solid #3498db — 2px蓝色实线边框
+         *   border-radius: 8px — 圆角8px
+         *   box-shadow: 0 4px 12px rgba(0,0,0,0.3) — 阴影偏移(0,4px)、模糊12px、30%透明度
+         *   padding: 15px — 内边距15px
+         *   font-size: 13px — 字体大小13px
+         *   line-height: 1.6 — 行高1.6倍
+         *   color: #333 — 深灰色文字
+         *   text-align: left — 文字左对齐
+         *   white-space: normal — 允许文字正常换行
+         *   word-wrap: break-word — 长单词自动断行
+         */
         .rules-popup {
             display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-            width: max-content;         /* 根据内容自动撑开 */
-            max-width: 90vw;            /* 不超出屏幕宽度的90% */
+            width: max-content;
+            max-width: 90vw;
             max-height: 24em; overflow-y: auto;
             background: #fff; border: 2px solid #3498db;
             border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -31,15 +138,31 @@
             text-align: left;
             white-space: normal; word-wrap: break-word;
         }
+        /* .rules-popup.show: JS 通过 classList.toggle('show') 切换此样式 → display:block 显示弹窗 */
         .rules-popup.show { display: block; }
+        /*
+         * .rules-title:
+         *   text-align: center — 标题居中
+         *   font-weight: bold — 粗体
+         *   margin-bottom: 10px — 底部间距10px
+         *   font-size: 14px — 字体大小14px
+         */
         .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+        /*
+         * .rules-popup p:
+         *   margin: 4px 0 — 上下4px、左右0的段落间距
+         */
         .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!-- ========== 规则弹窗区域 ========== -->
+<!-- 固定在页面右上角，不受页面滚动影响 -->
 <div class="rules-container">
+    <!-- 规则触发按钮，点击调用 toggleRules() 切换弹窗显隐 -->
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <!-- 规则内容弹窗，初始隐藏（display:none），通过 .show 类控制显示 -->
     <div class="rules-popup" id="rulesPopup">
         <div class="rules-title">马刀游戏规则</div>
         <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
@@ -57,11 +180,35 @@
     </div>
 </div>
 
+<!-- ========== 主内容区：创建房间 + 加入房间 ========== -->
 <div class="container">
     <h1>⚔️ 马刀游戏</h1>
 
+    <!--
+      Thymeleaf 条件渲染：仅当后端传入了 error 属性时才显示错误信息
+      参数说明:
+        - ${error}: String 类型，由 Controller 通过 Model.addAttribute("error", msg) 传入
+          典型场景：房间不存在时 Controller 重定向到 /?error=房间不存在
+          对应 Controller: GameController.index() 接收 @RequestParam(required=false) String error
+      渲染逻辑:
+        - th:if="${error}": error 非 null 且非空时渲染此 div
+        - th:text="${error}": 将 error 值设置为 div 的文本内容
+        - class="error": 红色文字样式
+    -->
     <div th:if="${error}" class="error" th:text="${error}"></div>
 
+    <!-- ===== 创建房间表单 ===== -->
+    <!--
+      提交到 POST /create，由 GameController.createRoom() 处理
+      表单参数:
+        - name (String, required): 玩家昵称，用于在游戏中显示
+          后端绑定: @RequestParam String name → 创建 Player 对象时设置 name 字段
+        - count (int, required, min=2, max=6): 目标玩家数量
+          后端绑定: @RequestParam int count → 创建 GameRoom 时设置 playerCount 字段
+          HTML 限制: min="2" max="6" 浏览器端校验，默认值 value="2"
+      成功后重定向: /lobby/{roomId}/{playerId}
+      失败后重定向: /?error=错误信息
+    -->
     <div class="form-section">
         <h2>创建房间</h2>
         <form th:action="@{/create}" method="post">
@@ -71,6 +218,18 @@
         </form>
     </div>
 
+    <!-- ===== 加入房间表单 ===== -->
+    <!--
+      提交到 POST /join，由 GameController.joinRoom() 处理
+      表单参数:
+        - roomId (String, required): 要加入的房间ID，由房主从等待大厅复制分享
+          后端绑定: @RequestParam String roomId → 调用 GameService 查找对应 GameRoom
+          校验: 如果房间不存在或已满，重定向回 /?error=...
+        - name (String, required): 玩家昵称，用于在游戏中显示
+          后端绑定: @RequestParam String name → 创建 Player 对象时设置 name 字段
+      成功后重定向: /lobby/{roomId}/{playerId}
+      失败后重定向: /?error=错误信息（如"房间不存在"、"房间已满"）
+    -->
     <div class="form-section">
         <h2>加入房间</h2>
         <form th:action="@{/join}" method="post">
@@ -81,13 +240,35 @@
     </div>
 </div>
 
+<!-- ========== 规则弹窗交互脚本 ========== -->
 <script>
+    /**
+     * 切换规则弹窗的显示/隐藏状态
+     * 无参数
+     * 原理: 通过给 #rulesPopup 元素切换 .show CSS 类实现
+     *   - .rules-popup 默认 display:none
+     *   - .rules-popup.show 设置为 display:block
+     */
     function toggleRules() {
+        // popup: 规则弹窗 DOM 元素
         var popup = document.getElementById('rulesPopup');
+        // classList.toggle(): 如果有 .show 则移除，没有则添加
         popup.classList.toggle('show');
     }
+
+    /**
+     * 全局点击监听：点击弹窗外部区域时自动关闭弹窗
+     * @param {MouseEvent} e - 浏览器点击事件对象
+     *   e.target: 实际被点击的 DOM 元素
+     * 判断逻辑：
+     *   - 检查 e.target 是否在 .rules-container 内部
+     *   - 在内部 → 不处理（由按钮自己的 onclick 触发 toggleRules 处理）
+     *   - 在外部 → 移除 .show 类关闭弹窗
+     */
     window.addEventListener('click', function(e) {
+        // container: 规则按钮和弹窗的父容器
         var container = document.querySelector('.rules-container');
+        // contains(): 判断 e.target 是否为 container 的后代元素
         if (!container.contains(e.target)) {
             document.getElementById('rulesPopup').classList.remove('show');
         }

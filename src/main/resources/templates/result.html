@@ -1,9 +1,67 @@
 <!DOCTYPE html>
+<!--
+  ================================================================================
+  文件: result.html - 马刀游戏 · 游戏结束/结果页面
+  ================================================================================
+
+  【路由信息】
+  请求路径: GET /game/{roomId}/{playerId}
+  对应Controller: GameController.gamePage()
+  分发条件: 当 room.status == "FINISHED"（游戏已结束，只剩一位存活玩家）
+  -> 展示胜利者和最终游戏状态
+
+  【页面功能】
+  1. 展示胜利者名称（data.winner），带🏆奖杯弹跳动画
+  2. 展示"🎉 游戏结束 🎉"发光文字动画
+  3. 彩色纸屑飘落庆祝动画（100片随机颜色/大小/速度/延迟）
+  4. 展示所有玩家的最终状态（HP、位置、装备）
+  5. 展示完整操作记录（actionLogs）
+  6. 支持查看聊天记录并发送消息
+  7. "返回首页"按钮（离开房间）
+  8. 规则弹窗查看游戏规则
+  9. 每2秒轮询保持状态同步
+
+  【后端注入变量（Thymeleaf Model 属性）】
+  ${roomId}  : String - 当前房间ID（UUID），来源: GameController model.addAttribute("roomId", roomId)
+  ${playerId} : String - 当前玩家ID（UUID），来源: GameController model.addAttribute("playerId", playerId)
+
+  【前端行为总览】
+  - 页面加载时触发 createConfetti() 创建100片纸屑动画
+  - 调用 fetchState() 获取最终游戏状态
+  - setInterval(fetchState, 2000) 每2秒轮询
+  - 读取 data.winner 更新胜利者名称
+  - 读取 data.players 渲染最终玩家状态
+  - 房间不存在时跳转到首页 /
+
+  【视觉效果总览】
+  - 暗色渐变背景（#1a1a2e → #16213e → #0f3460）
+  - 🏆 奖杯图标弹跳动画（bounce: 1.5s周期，translateY(-20px)）
+  - "游戏结束"文字发光呼吸动画（glow: 2s周期，阴影从10px→80px）
+  - 胜利者名称滑入动画（slideIn: 1s，从下方30px淡入）
+  - 100片彩色纸屑飘落旋转动画（fall: 线性无限，translateY(100vh)+rotate(720deg)）
+  - 面板使用 backdrop-filter: blur(5px) 毛玻璃效果
+
+  ================================================================================
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
+    <!--
+      charset: UTF-8 统一字符编码
+    -->
     <meta charset="UTF-8">
     <title>马刀游戏 - 游戏结束</title>
     <style>
+        /*
+         * body 全局样式（暗色庆祝主题）
+         * font-family: Arial, sans-serif — 无衬线字体族
+         * margin: 0 — 无边距，让背景铺满全屏
+         * padding: 20px — 内容区留白
+         * text-align: center — 全局居中对齐（胜利者展示为核心）
+         * background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)
+         *   — 135度对角线渐变，三色过渡（深紫黑→深蓝→深海蓝）
+         * color: white — 全局白色文字
+         * min-height: 100vh — 最小高度撑满整个视口
+         */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -13,34 +71,121 @@
             color: white;
             min-height: 100vh;
         }
+
+        /*
+         * .winner-section 胜利者展示区域
+         * margin: 30px auto — 上下 30px，左右自动（居中）
+         * padding: 20px — 内边距
+         */
         .winner-section { margin: 30px auto; padding: 20px; }
+
+        /*
+         * .trophy 奖杯图标
+         * font-size: 80px — 超大尺寸 80px
+         * animation: bounce 1.5s infinite — 弹跳动画，周期 1.5 秒，无限循环
+         * display: block — 块级元素，独占一行
+         */
         .trophy { font-size: 80px; animation: bounce 1.5s infinite; display: block; }
+
+        /*
+         * @keyframes bounce 奖杯弹跳动画
+         * 0%, 100%: translateY(0) — 起始和结束位置（原位）
+         * 50%: translateY(-20px) — 中间向上移动 20px
+         * 效果: 奖杯在垂直方向持续上下弹跳
+         */
         @keyframes bounce {
             0%,100% { transform: translateY(0); }
             50% { transform: translateY(-20px); }
         }
+
+        /*
+         * .winner-text "游戏结束"文字
+         * font-size: 48px — 大号字体
+         * font-weight: bold — 加粗
+         * color: #ffd700 — 金色文字
+         * text-shadow: 0 0 20px #ff8c00, 0 0 40px #ff4500
+         *   — 双层发光阴影: 内层暗橙 20px模糊，外层橙红 40px模糊
+         * margin: 20px 0 — 上下间距
+         * animation: glow 2s ease-in-out infinite alternate
+         *   — 发光呼吸动画，周期 2 秒，缓入缓出，无限交替
+         */
         .winner-text {
             font-size: 48px; font-weight: bold; color: #ffd700;
             text-shadow: 0 0 20px #ff8c00, 0 0 40px #ff4500;
             margin: 20px 0; animation: glow 2s ease-in-out infinite alternate;
         }
+
+        /*
+         * @keyframes glow 文字发光呼吸动画
+         * from: text-shadow 10px+20px — 较小的发光范围
+         * to: text-shadow 30px+60px+80px — 较大的发光范围，三层阴影
+         * 效果: 文字光晕周期性扩大缩小，营造呼吸感
+         */
         @keyframes glow {
             from { text-shadow: 0 0 10px #ffd700, 0 0 20px #ff8c00; }
             to { text-shadow: 0 0 30px #ffd700, 0 0 60px #ff4500, 0 0 80px #ff0000; }
         }
+
+        /*
+         * .winner-name 胜利者名称标签
+         * font-size: 36px — 大号字体
+         * background: rgba(255,215,0,0.2) — 20%透明度金色背景
+         * display: inline-block — 行内块，宽度自适应内容
+         * padding: 10px 30px — 上下 10px，左右 30px
+         * border-radius: 50px — 大圆角，胶囊形状
+         * border: 2px solid #ffd700 — 2px 金色边框
+         * margin-top: 10px — 上方间距
+         * animation: slideIn 1s ease-out — 滑入动画，1秒，缓出
+         */
         .winner-name {
             font-size: 36px; background: rgba(255,215,0,0.2);
             display: inline-block; padding: 10px 30px; border-radius: 50px;
             border: 2px solid #ffd700; margin-top: 10px; animation: slideIn 1s ease-out;
         }
+
+        /*
+         * @keyframes slideIn 胜利者名称滑入动画
+         * from: opacity: 0, translateY(30px) — 透明且在下方 30px
+         * to: opacity: 1, translateY(0) — 完全不透明，原位
+         * 效果: 文字从下方淡入滑上
+         */
         @keyframes slideIn {
             from { opacity: 0; transform: translateY(30px); }
             to { opacity: 1; transform: translateY(0); }
         }
+
+        /*
+         * .confetti 纸屑粒子（庆祝动画）
+         * position: fixed — 固定定位，覆盖整个视口
+         * top: -100px — 初始在视口上方 100px（从顶部外开始落下）
+         * width: 10px; height: 10px — 默认尺寸 10×10px（JS 中会被随机覆盖为 5-15px）
+         * background: #ff0 — 默认黄色（JS 中会被随机颜色覆盖）
+         * animation: fall linear infinite — 下落动画，线性速度，无限循环
+         * z-index: 0 — 最底层，不遮挡内容
+         */
         .confetti { position: fixed; top:-100px; width:10px; height:10px; background:#ff0; animation:fall linear infinite; z-index:0; }
+
+        /*
+         * @keyframes fall 纸屑下落旋转动画
+         * to: translateY(100vh) rotate(720deg); opacity: 0
+         *   — 移动到视口高度 100% 处（底部外），旋转 720 度（2圈），渐隐至透明
+         * 效果: 纸屑从顶部飘落到底部，同时旋转并逐渐消失
+         */
         @keyframes fall {
             to { transform: translateY(100vh) rotate(720deg); opacity: 0; }
         }
+
+        /*
+         * .status-box 最终状态面板
+         * border: 1px solid #ffd700 — 金色边框
+         * margin: 30px auto — 上下 30px，左右自动居中
+         * max-width: 700px — 最大宽度 700px，大屏幕下不会过宽
+         * text-align: left — 面板内文字左对齐
+         * background: rgba(255,255,255,0.1) — 10%透明度白色半透明背景
+         * backdrop-filter: blur(5px) — 背景模糊 5px（毛玻璃效果，需浏览器支持）
+         * border-radius: 10px — 圆角
+         * position: relative; z-index: 1 — 相对定位，z-index 确保在纸屑之上
+         */
         .status-box {
             border: 1px solid #ffd700;
             margin: 30px auto;
@@ -51,6 +196,16 @@
             border-radius: 10px;
             position: relative; z-index: 1;
         }
+
+        /*
+         * .status-box h4 面板标题
+         * margin: 0 — 清除默认外边距
+         * padding: 12px 20px — 上下 12px，左右 20px（比 action.html 稍大）
+         * background: rgba(0,0,0,0.3) — 30%透明度黑色
+         * border-bottom: 1px solid #ffd700 — 金色底部分隔线
+         * color: #ffd700 — 金色文字
+         * border-radius: 10px 10px 0 0 — 仅顶部圆角
+         */
         .status-box h4 {
             margin: 0; padding: 12px 20px;
             background: rgba(0,0,0,0.3);
@@ -58,7 +213,25 @@
             color: #ffd700;
             border-radius: 10px 10px 0 0;
         }
+
+        /*
+         * .players-container 玩家卡片弹性布局
+         * display: flex; flex-wrap: wrap — 弹性换行
+         * gap: 10px — 卡片间距
+         * padding: 15px — 内边距
+         * justify-content: center — 卡片居中排列
+         */
         .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 15px; justify-content: center; }
+
+        /*
+         * .player-card 玩家信息卡片
+         * border: 1px solid rgba(255,255,255,0.3) — 30%透明度白色边框
+         * padding: 10px 15px — 上下 10px，左右 15px
+         * background: rgba(255,255,255,0.05) — 5%透明度白色
+         * min-width: 130px — 最小宽度
+         * border-radius: 8px — 圆角
+         * color: white — 白色文字
+         */
         .player-card {
             border: 1px solid rgba(255,255,255,0.3);
             padding: 10px 15px;
@@ -67,10 +240,34 @@
             border-radius: 8px;
             color: white;
         }
+
+        /*
+         * .player-card.current 自己高亮
+         * border-color: #ffd700 — 金色边框
+         * background: rgba(255,215,0,0.2) — 20%透明度金色背景
+         */
         .player-card.current { border-color: #ffd700; background: rgba(255,215,0,0.2); }
+
+        /*
+         * .player-card.dead 死亡玩家灰色样式
+         */
         .player-card.dead { background: rgba(100,100,100,0.3); color: #aaa; border-color: #666; }
+
+        /*
+         * .player-card p 段落间距
+         */
         .player-card p { margin: 4px 0; }
+
+        /*
+         * .blood-buff 血祭buff
+         * color: #ff4444 — 亮红色（暗色背景适配）
+         */
         .blood-buff { color: #ff4444; font-weight: bold; }
+
+        /*
+         * .log-box 操作记录容器
+         * margin: 30px auto; max-width: 700px — 居中，最大宽度 700px
+         */
         .log-box {
             border: 1px solid #ffd700;
             margin: 30px auto;
@@ -80,6 +277,10 @@
             border-radius: 10px;
             position: relative; z-index: 1;
         }
+
+        /*
+         * .log-box h4 操作记录标题
+         */
         .log-box h4 {
             margin: 0; padding: 12px 20px;
             background: rgba(0,0,0,0.3);
@@ -87,9 +288,25 @@
             color: #ffd700;
             border-radius: 10px 10px 0 0;
         }
+
+        /*
+         * .log-scroll 日志滚动区
+         * max-height: 200px — 最大高度 200px
+         * overflow-y: auto — 超出垂直滚动
+         */
         .log-scroll { max-height: 200px; overflow-y: auto; }
+
+        /*
+         * .log-scroll ul 日志列表
+         * color: #ccc — 浅灰色文字
+         */
         .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
         .log-scroll li { margin: 3px 0; }
+
+        /*
+         * .chat-box 聊天面板
+         * margin: 20px auto; max-width: 700px — 居中，最大宽度 700px
+         */
         .chat-box {
             border: 1px solid #ffd700;
             margin: 20px auto;
@@ -99,6 +316,10 @@
             border-radius: 10px;
             position: relative; z-index: 1;
         }
+
+        /*
+         * .chat-box h4 聊天标题
+         */
         .chat-box h4 {
             margin: 0; padding: 12px 20px;
             background: rgba(0,0,0,0.3);
@@ -106,24 +327,99 @@
             color: #ffd700;
             border-radius: 10px 10px 0 0;
         }
+
+        /*
+         * .chat-scroll 聊天滚动区
+         * max-height: 150px — 最大高度 150px
+         */
         .chat-scroll { max-height: 150px; overflow-y: auto; }
         .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
         .chat-scroll li { margin: 3px 0; }
+
+        /*
+         * .chat-form 聊天输入表单
+         * padding: 10px — 内边距
+         * display: flex — 弹性布局
+         * gap: 5px — 间距
+         */
         .chat-form { padding: 10px; display: flex; gap: 5px; }
+
+        /*
+         * a 标签（"返回首页"按钮）
+         * display: inline-block — 行内块，可设宽高和内外边距
+         * margin-top: 20px — 上方间距
+         * padding: 12px 30px — 上下 12px，左右 30px
+         * background: #ffd700 — 金色背景，醒目 CTA 按钮
+         * color: #1a1a2e — 深色文字（与金色背景形成对比）
+         * text-decoration: none — 去除链接下划线
+         * border-radius: 50px — 大圆角，胶囊形状
+         * font-weight: bold — 加粗
+         * font-size: 16px — 字体大小
+         * position: relative; z-index: 1 — 确保在纸屑之上
+         * transition: 0.3s — 过渡动画 0.3 秒
+         */
         a {
             display: inline-block; margin-top: 20px; padding: 12px 30px;
             background: #ffd700; color: #1a1a2e; text-decoration: none;
             border-radius: 50px; font-weight: bold; font-size: 16px;
             position: relative; z-index: 1; transition: 0.3s;
         }
+
+        /*
+         * a:hover 悬停效果
+         * background: #ffed4a — 更亮的金色
+         * transform: scale(1.05) — 放大 5%，微妙的悬浮感
+         */
         a:hover { background: #ffed4a; transform: scale(1.05); }
 
-        /* 规则按钮（深色主题适配） */
+        /* ===== 规则按钮（固定定位，暗色主题适配） ===== */
+
+        /*
+         * .rules-container 规则按钮容器
+         * position: fixed — 固定定位，始终在视口右上角
+         * top: 15px; right: 20px — 距右上角位置
+         * z-index: 1000 — 最高层级
+         */
         .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+
+        /*
+         * .rules-btn 规则按钮
+         * padding: 8px 16px — 上下 8px，左右 16px
+         * background: #3498db — 蓝色背景
+         * color: white — 白色文字
+         * border: none — 无边框
+         * border-radius: 6px — 圆角 6px
+         * cursor: pointer — 手型指针
+         * font-size: 14px — 字体大小
+         */
         .rules-btn {
             padding: 8px 16px; background: #3498db; color: white; border: none;
             border-radius: 6px; cursor: pointer; font-size: 14px;
         }
+
+        /*
+         * .rules-popup 规则弹窗（暗色主题）
+         * display: none — 默认隐藏
+         * position: absolute — 相对 .rules-container 定位
+         * right: 0 — 右对齐
+         * top: 100% — 紧贴按钮下方
+         * margin-top: 5px — 额外间距
+         * width: max-content — 宽度自适应内容
+         * max-width: 90vw — 最大宽度 90% 视口
+         * max-height: 24em — 最大高度约 24 行
+         * overflow-y: auto — 超出垂直滚动
+         * background: #222 — 深灰黑色背景
+         * border: 2px solid #ffd700 — 2px 金色边框
+         * border-radius: 8px — 圆角 8px
+         * box-shadow: 0 4px 12px rgba(0,0,0,0.6) — 阴影
+         * padding: 15px — 内边距
+         * font-size: 13px — 字号
+         * line-height: 1.6 — 行高
+         * color: #eee — 浅灰白色文字
+         * text-align: left — 左对齐
+         * white-space: normal — 正常换行
+         * word-wrap: break-word — 长单词断行
+         */
         .rules-popup {
             display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
             width: max-content; max-width: 90vw;
@@ -134,13 +430,32 @@
             text-align: left;
             white-space: normal; word-wrap: break-word;
         }
+
+        /*
+         * .rules-popup.show 弹窗显示状态
+         */
         .rules-popup.show { display: block; }
+
+        /*
+         * .rules-title 弹窗标题
+         * color: #ffd700 — 金色文字
+         */
         .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; color: #ffd700; }
+
+        /*
+         * .rules-popup p 规则段落
+         * margin: 4px 0 — 上下间距
+         */
         .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!--
+  ==================== 规则弹窗 ====================
+  固定定位在右上角，点击"📜 规则"按钮展开/收起
+  状态存储: sessionStorage key = 'rulesPopupVisible_' + roomId
+-->
 <div class="rules-container">
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
     <div class="rules-popup" id="rulesPopup">
@@ -160,14 +475,40 @@
     </div>
 </div>
 
+<!--
+  ==================== 纸屑动画容器 ====================
+  id="confettiContainer" — 纸屑粒子挂载点
+  页面 load 事件触发 createConfetti()，在其中创建 100 个 .confetti div
+  每个纸屑: position:fixed，从顶部外(-100px)飘落到底部外(100vh)
+-->
 <div id="confettiContainer"></div>
 
+<!--
+  ==================== 胜利者展示区 ====================
+  包含三个动画元素:
+    1. 🏆 奖杯图标 — bounce 弹跳动画
+    2. 🎉 游戏结束 🎉 — glow 发光呼吸动画
+    3. 胜利者名称 — slideIn 滑入动画，内容由 fetchState() 更新
+-->
 <div class="winner-section" id="winnerSection">
+    <!-- 奖杯 emoji，弹跳动画 -->
     <span class="trophy">🏆</span>
+    <!-- "游戏结束"发光文字 -->
     <div class="winner-text">🎉 游戏结束 🎉</div>
+    <!--
+      id="winnerName" — 胜利者名称容器
+      初始显示 "加载中..."，fetchState() 中根据 data.winner 更新为 "胜利者：XXX"
+      data.winner: String — 胜利者名称，来源: /api/room 响应中的 winner 字段
+    -->
     <div class="winner-name" id="winnerName">加载中...</div>
 </div>
 
+<!--
+  ==================== 最终状态面板 ====================
+  展示所有玩家的最终状态（含存活和死亡玩家）
+  由 updatePlayers(data.players) 动态渲染
+  max-width: 700px 居中显示，带毛玻璃效果
+-->
 <div class="status-box">
     <h4>📋 最终状态</h4>
     <div class="players-container" id="playersContainer">
@@ -175,6 +516,11 @@
     </div>
 </div>
 
+<!--
+  ==================== 操作记录面板 ====================
+  展示完整的行动日志
+  max-width: 700px 居中显示
+-->
 <div class="log-box">
     <h4>📜 操作记录</h4>
     <div class="log-scroll" id="logScroll">
@@ -182,36 +528,89 @@
     </div>
 </div>
 
+<!--
+  ==================== 聊天面板 ====================
+  游戏结束后仍可查看聊天记录和发送消息
+  max-width: 700px 居中显示
+-->
 <div class="chat-box">
     <h4>💬 聊天</h4>
     <div class="chat-scroll" id="chatScroll">
         <ul id="chatList"></ul>
     </div>
+    <!--
+      聊天表单: POST /api/chat/{roomId}/{playerId}
+    -->
     <form id="chatForm" class="chat-form">
         <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
         <button type="submit">发送</button>
     </form>
 </div>
 
+<!--
+  "返回首页"按钮 — 离开房间
+  th:href: Thymeleaf 链接表达式
+    @{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}
+    渲染后如: /leave/a1b2c3d4.../e5f6g7h8...
+  效果: 从房间中移除该玩家，跳转回首页 /
+  样式: 金色胶囊按钮，悬停时放大 5% + 变亮
+-->
 <a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" id="leaveLink">返回首页</a>
 
+<!--
+  ===================================================================
+  页面交互脚本（Thymeleaf 内联模式）
+  th:inline="javascript" 启用 Thymeleaf JS 内联，支持 /*[[...]]*/ 语法
+  ===================================================================
+-->
 <script th:inline="javascript">
+
+    // roomId: 房间 UUID 字符串
+    // 由 Thymeleaf 内联表达式 /*[[${roomId}]]*/ 在服务端渲染时替换
+    // 来源: GameController 中 model.addAttribute("roomId", roomId)
+    // 类型: string（36位 UUID 格式）
     var roomId = /*[[${roomId}]]*/ '';
+
+    // playerId: 当前玩家 UUID 字符串
+    // 由 Thymeleaf 内联表达式 /*[[${playerId}]]*/ 在服务端渲染时替换
+    // 来源: GameController 中 model.addAttribute("playerId", playerId)
+    // 类型: string（36位 UUID 格式）
     var playerId = /*[[${playerId}]]*/ '';
 
     // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
+
+    /*
+     * RULES_KEY: String
+     * sessionStorage 存储键名，格式: 'rulesPopupVisible_' + roomId
+     */
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
+
+    /*
+     * toggleRules() — 切换规则弹窗展开/收起
+     * 无参数，无返回值
+     * 副作用: 切换 #rulesPopup 的 'show' 类，更新 sessionStorage
+     */
     function toggleRules() {
         var popup = document.getElementById('rulesPopup');
         popup.classList.toggle('show');
         sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
     }
+
+    /*
+     * restoreRulesPopup() — 恢复弹窗展开状态
+     */
     function restoreRulesPopup() {
         var popup = document.getElementById('rulesPopup');
         if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
             popup.classList.add('show');
         }
     }
+
+    /*
+     * 全局点击监听 — 点击规则容器外部时关闭弹窗
+     * @param e: MouseEvent — 点击事件对象
+     * e.target: 被点击的 DOM 元素
+     */
     window.addEventListener('click', function(e) {
         var container = document.querySelector('.rules-container');
         if (!container.contains(e.target)) {
@@ -221,85 +620,218 @@
         }
     });
 
-    // 纸屑动画
+    // ========== 纸屑庆祝动画 ==========
+
+    /*
+     * createConfetti() — 创建彩色纸屑飘落动画
+     *
+     * 创建 100 个纸屑粒子，每个粒子随机以下属性:
+     *   - 颜色: 从6种颜色中随机选取 (#ffd700金色, #ff6b6b红色, #4ecdc4青色,
+     *                                   #45b7d1蓝色, #f9ca24黄色, #ff9ff3粉色)
+     *   - 水平位置: left = Math.random() * 100 + '%'（0%~100% 随机分布）
+     *   - 尺寸: width/height = Math.random() * 10 + 5（5px~15px 随机）
+     *   - 下落速度: animationDuration = Math.random() * 3 + 2（2s~5s 随机周期）
+     *   - 下落延迟: animationDelay = Math.random() * 5（0s~5s 随机延迟，避免同步）
+     *
+     * 动画效果: CSS @keyframes fall
+     *   translateY(100vh) — 从顶部外飘落到视口底部外
+     *   rotate(720deg) — 旋转 2 圈
+     *   opacity: 0 — 最终渐隐
+     *
+     * 触发时机: window 'load' 事件（页面完全加载后）
+     * 挂载目标: #confettiContainer
+     *
+     * 无参数，无返回值
+     */
     function createConfetti() {
+        // 6种庆祝颜色
         var colors = ['#ffd700', '#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#ff9ff3'];
         var container = document.getElementById('confettiContainer');
+
+        // 创建 100 片纸屑
         for (var i = 0; i < 100; i++) {
             var confetti = document.createElement('div');
             confetti.className = 'confetti';
+
+            // 水平位置: 0%~100% 视口宽度随机
             confetti.style.left = Math.random() * 100 + '%';
+
+            // 颜色: 从 colors 数组随机选取
+            // Math.floor(Math.random() * colors.length): 0~5 随机索引
             confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
+
+            // 尺寸: 5px~15px 随机（Math.random() * 10 + 5）
             confetti.style.width = (Math.random() * 10 + 5) + 'px';
             confetti.style.height = (Math.random() * 10 + 5) + 'px';
+
+            // 动画周期: 2s~5s 随机（Math.random() * 3 + 2）
             confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+
+            // 动画延迟: 0s~5s 随机，避免所有纸屑同步下落
             confetti.style.animationDelay = Math.random() * 5 + 's';
+
             container.appendChild(confetti);
         }
     }
+
+    /*
+     * window 'load' 事件 — 页面完全加载（含图片/样式等资源）后创建纸屑
+     * 使用 'load' 而非 'DOMContentLoaded'，确保 CSS 动画就绪
+     */
     window.addEventListener('load', createConfetti);
 
     // ========== AJAX 刷新 ==========
+
+    /*
+     * fetchState() — 异步获取游戏最终状态
+     *
+     * API 调用: GET /api/room/{roomId}?playerId={playerId}
+     *
+     * 响应 JSON 数据结构（结果页面使用的字段）:
+     *   - status:         String       — 房间状态，应为 "FINISHED"
+     *   - winner:         String|null  — 胜利者名称（游戏结束时后端设置）
+     *   - players:        Array<Object> — 所有玩家最终状态
+     *     [].id:          String        — 玩家 UUID
+     *     [].name:        String        — 玩家昵称
+     *     [].hp:          int           — 最终生命值
+     *     [].horse:       boolean       — 是否拥有马
+     *     [].knife:       boolean       — 是否拥有刀
+     *     [].buff:        boolean       — 是否有血祭 buff
+     *     [].location:    String        — 最终位置
+     *   - actionLogs:     Array<String> — 完整行动日志
+     *   - chatMessages:   Array<String> — 聊天消息
+     *
+     * 跳转逻辑:
+     *   !data.status → 房间不存在 → 跳转到首页 /
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用: 更新 winnerName、玩家卡片、日志、聊天
+     */
     async function fetchState() {
         try {
+            // 构建 API URL
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
             var res = await fetch(url);
             if (!res.ok) return;
             var data = await res.json();
+
+            // 房间不存在 → 返回首页
             if (!data.status) {
                 window.location.href = '/';
                 return;
             }
+
+            // data.winner: String — 胜利者名称
+            // 更新胜利者名称显示
             if (data.winner) {
                 document.getElementById('winnerName').textContent = '胜利者：' + data.winner;
             }
-            updatePlayers(data.players);
-            updateLogs(data.actionLogs);
-            updateChat(data.chatMessages);
+
+            // 更新三个展示面板
+            updatePlayers(data.players);       // 参数: data.players — Array<Player>
+            updateLogs(data.actionLogs);       // 参数: data.actionLogs — Array<String>
+            updateChat(data.chatMessages);     // 参数: data.chatMessages — Array<String>
 
             // 恢复规则弹窗状态
             restoreRulesPopup();
         } catch (e) { console.error(e); }
     }
 
+    /*
+     * updatePlayers(players) — 更新最终玩家状态卡片
+     *
+     * 渲染每个玩家的最终信息:
+     *   - 名称 + "（我）"标识
+     *   - 🐴 马: 有/无
+     *   - 🔪 刀: 有/无
+     *   - ❤️ HP: 最终生命值
+     *   - 📍 位置: 最终位置
+     *   - 🔥 血祭: 仅 buff==true 且存活时显示
+     *
+     * CSS 类:
+     *   - .current: p.id === playerId（金色边框）
+     *   - .dead: p.hp <= 0（灰色样式）
+     *
+     * @param players: Array<Object> — 玩家信息数组
+     *   每项字段:
+     *     p.id:       String  — 玩家 UUID
+     *     p.name:     String  — 玩家昵称
+     *     p.hp:       int     — 最终生命值
+     *     p.horse:    boolean — 是否有马
+     *     p.knife:    boolean — 是否有刀
+     *     p.buff:     boolean — 是否有血祭 buff
+     *     p.location: String  — 最终位置
+     */
     function updatePlayers(players) {
         if (!players) return;
         var container = document.getElementById('playersContainer');
         var html = '';
         for (var i = 0; i < players.length; i++) {
             var p = players[i];
-            var isMe = p.id === playerId;
+            var isMe = p.id === playerId;  // boolean — 是否是自己
             var deadClass = p.hp <= 0 ? ' dead' : '';
             var currentClass = isMe ? ' current' : '';
+
             html += '<div class="player-card' + currentClass + deadClass + '">';
             html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
             html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
             html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
             html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';
             html += '<p>📍 ' + p.location + '</p>';
+            // 血祭buff: 仅 buff==true 且存活时显示
             if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
             html += '</div>';
         }
         container.innerHTML = html;
     }
 
+    /*
+     * updateLogs(logs) — 更新操作记录列表
+     *
+     * 优化: 仅当日志数量变化时才重新渲染
+     * 新消息自动滚动到底部
+     *
+     * @param logs: Array<String> — 操作日志列表
+     *   每条格式如: "张三 移动到城外"
+     */
     function updateLogs(logs) {
         if (!logs) return;
         var logList = document.getElementById('logList');
+
+        // logList.children.length: int — DOM 中已有 <li> 数量
+        // 仅数量变化时重渲染
         if (logList.children.length !== logs.length) {
             var html = '';
             for (var i = 0; i < logs.length; i++) html += '<li>' + logs[i] + '</li>';
             logList.innerHTML = html;
+
+            // 自动滚动到底部
+            // scrollTop: 当前滚动位置; scrollHeight: 内容总高度
             document.getElementById('logScroll').scrollTop = document.getElementById('logScroll').scrollHeight;
         }
     }
 
+    /*
+     * updateChat(messages) — 更新聊天消息列表（深度比较版本）
+     *
+     * 优化: 先比数量，数量相同时逐条比较内容
+     * 新消息自动滚动到底部
+     *
+     * @param messages: Array<String> — 聊天消息列表
+     *   每条格式如: "张三：打得好！"
+     */
     function updateChat(messages) {
         if (!messages) return;
         var chatList = document.getElementById('chatList');
+
+        // 快速检查: 数量不同需要更新
         var needUpdate = chatList.children.length !== messages.length;
         if (!needUpdate) {
+            // 数量相同 → 逐条比较文本内容
             for (var i = 0; i < messages.length; i++) {
+                // chatList.children[i].textContent: DOM 中第 i 条消息
+                // messages[i]: API 返回的第 i 条消息
                 if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
             }
         }
@@ -307,28 +839,58 @@
             var html = '';
             for (var i = 0; i < messages.length; i++) html += '<li>' + messages[i] + '</li>';
             chatList.innerHTML = html;
+
+            // 自动滚动到底部
             document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
         }
     }
 
+    /*
+     * 聊天表单提交事件
+     *
+     * API 调用: POST /api/chat/{roomId}/{playerId}
+     * 请求参数 (FormData):
+     *   - message: String — 聊天内容
+     *
+     * 流程:
+     *   1. 阻止默认提交 (e.preventDefault())
+     *   2. 读取并 trim 输入内容，空消息返回
+     *   3. POST 发送消息
+     *   4. 清空输入框
+     *   5. 立即 fetch /api/room 刷新聊天列表
+     *
+     * @param e: Event — 表单提交事件对象
+     */
     document.getElementById('chatForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         var input = document.getElementById('chatInput');
-        var message = input.value.trim();
+        var message = input.value.trim();  // String — 去除首尾空白的消息
         if (!message) return;
-        var formData = new FormData(); formData.append('message', message);
+
+        var formData = new FormData();
+        formData.append('message', message);  // String — 聊天内容
+
         try {
+            // POST 发送聊天消息
             await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';
+            input.value = '';  // 清空输入框
+
+            // 立即获取最新聊天消息
             var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
             var data = await res.json();
             updateChat(data.chatMessages);
         } catch (err) { console.error(err); }
     });
 
-    // 初始化：恢复规则弹窗并启动定时刷新
+    // ===== 页面初始化 =====
+
+    // 恢复规则弹窗状态
     restoreRulesPopup();
+
+    // 首次获取游戏状态（含胜利者信息）
     fetchState();
+
+    // 每 2000 毫秒（2秒）轮询，保持状态同步
     setInterval(fetchState, 2000);
 </script>
 </body>

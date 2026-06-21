@@ -1,43 +1,289 @@
 <!DOCTYPE html>
+<!--
+  ================================================================================
+  文件: action.html - 马刀游戏 · 行动页面
+  ================================================================================
+
+  【路由信息】
+  请求路径: GET /game/{roomId}/{playerId}
+  对应Controller: GameController.gamePage()
+  分发条件: 当 room.status == "PLAYING" 且 room.phase == "ACTION"
+           且 room.isCurrentPlayer(playerId) == true 且 player.getSteps() > 0
+  -> 表示轮到当前玩家执行行动操作
+
+  【页面功能】
+  1. 展示所有玩家状态（HP、位置、装备、步数、血祭buff）
+  2. 显示当前可用的行动按钮（根据装备/位置/同区域玩家动态生成）
+  3. 选择行动 → 选择目标/城市 → 最终确认提交
+  4. 通过 AJAX POST 提交行动到 /api/action/{roomId}/{playerId}
+  5. 提交后自动轮询 /api/room/{roomId} 更新状态
+  6. 当不是自己行动时，显示"等待其他玩家行动"界面
+  7. 实时显示操作记录（actionLogs）和聊天消息（chatMessages）
+  8. 支持发送聊天消息到 /api/chat/{roomId}/{playerId}
+
+  【后端注入变量（Thymeleaf Model 属性）】
+  ${roomId}  : String - 当前房间ID（UUID），来源: GameController model.addAttribute("roomId", roomId)
+  ${playerId} : String - 当前玩家ID（UUID），来源: GameController model.addAttribute("playerId", playerId)
+
+  【前端行为总览】
+  - 页面加载时调用 fetchState() 获取游戏状态
+  - setInterval(fetchState, 2000) 每2秒轮询一次
+  - 根据 isCurrentActionPlayer 和 currentPlayerSteps 决定显示行动UI或等待UI
+  - 行动类型编码(actionType) 0-7:
+    0=放弃  1=移动  2=买马  3=买刀  4=踢  5=刺  6=血祭  7=撵进去
+  - 某些操作无需目标/城市选择（放弃/买马/买刀/血祭/城内移动），直接提交
+  - 踢(4)/刺(5)/撵进去(7) 需要选择目标玩家
+  - 城外移动(1)/撵进去(7) 需要选择目标城市
+  - 使用 pendingAction 对象暂存用户选择，支持页面刷新后恢复
+  - 使用 sessionStorage 保存规则弹窗的展开/收起状态
+
+  ================================================================================
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
+    <!--
+      charset: UTF-8 统一字符编码，确保中文/emoji 正常显示
+    -->
     <meta charset="UTF-8">
     <title>马刀游戏 - 行动</title>
     <style>
+        /*
+         * body 全局样式
+         * font-family: Arial, sans-serif — 无衬线字体族，优先使用 Arial，不支持时回退到系统默认 sans-serif
+         * margin: 20px — 页面四周留白 20px，防止内容贴边
+         */
         body { font-family: Arial, sans-serif; margin: 20px; }
+
+        /*
+         * .status-box 玩家状态面板容器
+         * border: 1px solid #ccc — 1px 实线，颜色 #cccccc（浅灰边框）
+         * margin-bottom: 20px — 与下一个元素间距 20px
+         * background: #f9f9f9 — 浅灰背景，区别于白色内容区
+         */
         .status-box { border: 1px solid #ccc; margin-bottom: 20px; background: #f9f9f9; }
+
+        /*
+         * .status-box h4 面板标题
+         * margin: 0 — 取消 h4 默认外边距，使标题栏紧贴边框
+         * padding: 10px — 标题文字内边距
+         * background: #eee — 比容器稍深的灰色背景，形成层次感
+         * border-bottom: 1px solid #ddd — 底部 1px 分隔线，颜色 #dddddd
+         */
         .status-box h4 { margin: 0; padding: 10px; background: #eee; border-bottom: 1px solid #ddd; }
+
+        /*
+         * .players-container 玩家卡片弹性布局容器
+         * display: flex — 弹性盒布局，子元素自动横向排列
+         * flex-wrap: wrap — 允许换行，卡片过多时自动折行
+         * gap: 10px — 卡片之间间距 10px
+         * padding: 10px — 容器内边距
+         */
         .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }
+
+        /*
+         * .player-card 单个玩家信息卡片
+         * border: 1px solid #ddd — 1px 浅灰边框
+         * padding: 8px 12px — 上下 8px，左右 12px 内边距
+         * background: white — 白色背景，与灰色容器形成对比
+         * min-width: 130px — 最小宽度 130px，防止内容挤压变形
+         */
         .player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; }
+
+        /*
+         * .player-card.current 当前玩家高亮样式
+         * border-color: #3498db — 蓝色边框，标识"自己"
+         * background: #eaf4ff — 淡蓝背景
+         */
         .player-card.current { border-color: #3498db; background: #eaf4ff; }
+
+        /*
+         * .player-card.dead 已死亡玩家样式
+         * background: #d3d3d3 — 灰色背景（lightgray）
+         * color: #888 — 文字颜色变灰，弱化显示
+         * border-color: #aaa — 边框颜色也变灰
+         */
         .player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; }
+
+        /*
+         * .player-card p 卡片内段落
+         * margin: 3px 0 — 上下 3px 间距，紧凑排列信息行
+         */
         .player-card p { margin: 3px 0; }
+
+        /*
+         * .blood-buff 血祭buff标记样式
+         * color: red — 红色文字，警示含义
+         * font-weight: bold — 加粗，突出显示
+         */
         .blood-buff { color: red; font-weight: bold; }
+
+        /*
+         * .action-btn 行动按钮
+         * margin: 5px — 按钮四周间距 5px
+         * padding: 10px 20px — 上下 10px，左右 20px，保证点击区域足够大
+         * font-size: 16px — 字体大小 16px，易读
+         * cursor: pointer — 鼠标悬停时显示手型指针
+         */
         .action-btn { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+
+        /*
+         * .action-btn.active 已选中按钮高亮
+         * background: #c0e0ff — 淡蓝背景
+         */
         .action-btn.active { background: #c0e0ff; }
+
+        /*
+         * .section 操作参数区域（目标选择/城市选择）
+         * margin: 15px 0 — 上下 15px 间距
+         * display: none — 默认隐藏，选中需要参数的操作时才显示
+         * background: #f9f9f9 — 浅灰背景
+         * padding: 10px — 内边距
+         * border: 1px solid #ddd — 边框
+         */
         .section { margin: 15px 0; display: none; background: #f9f9f9; padding: 10px; border: 1px solid #ddd; }
+
+        /*
+         * .section label 参数区域标签
+         * font-weight: bold — 加粗
+         * margin-right: 10px — 标签与下拉框间距
+         */
         .section label { font-weight: bold; margin-right: 10px; }
+
+        /*
+         * select 下拉选择框
+         * padding: 5px — 内边距
+         * min-width: 150px — 最小宽度，防止选项文字被截断
+         */
         select { padding: 5px; min-width: 150px; }
+
+        /*
+         * #finalSubmit 最终确认按钮
+         * padding: 8px 25px — 上下 8px，左右 25px，宽大的点击区域
+         * font-size: 16px — 字体大小
+         * display: none — 默认隐藏，选择完操作和目标后才显示
+         */
         #finalSubmit { padding: 8px 25px; font-size: 16px; display: none; }
+
+        /*
+         * .log-box 操作记录容器
+         * border: 1px solid #ccc — 边框
+         * margin-top: 30px — 与上方元素间距
+         * background: #f9f9f9 — 背景色
+         */
         .log-box { border: 1px solid #ccc; margin-top: 30px; background: #f9f9f9; }
+
+        /*
+         * .log-box h4 操作记录标题
+         * position: sticky — 粘性定位，滚动时标题固定在顶部
+         * top: 0 — 粘在容器顶部
+         * z-index: 1 — 确保标题在滚动内容之上
+         */
         .log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+
+        /*
+         * .log-scroll 操作记录滚动区
+         * max-height: 200px — 最大高度 200px，超出后出现滚动条
+         * overflow-y: auto — 垂直方向自动滚动
+         */
         .log-scroll { max-height: 200px; overflow-y: auto; }
+
+        /*
+         * .log-scroll ul 日志列表
+         * margin: 0 — 清除默认外边距
+         * padding: 10px 20px — 上下 10px，左右 20px
+         * list-style-position: inside — 列表标记在内部
+         */
         .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
+
+        /*
+         * .log-scroll li 单条日志
+         * margin: 3px 0 — 上下间距 3px
+         */
         .log-scroll li { margin: 3px 0; }
+
+        /*
+         * .chat-box 聊天面板容器
+         * 样式与 .log-box 相同
+         */
         .chat-box { border: 1px solid #ccc; margin-top: 20px; background: #f9f9f9; }
+
+        /*
+         * .chat-box h4 聊天面板标题（粘性定位）
+         */
         .chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+
+        /*
+         * .chat-scroll 聊天消息滚动区
+         * max-height: 150px — 最大高度 150px
+         * overflow-y: auto — 垂直自动滚动
+         */
         .chat-scroll { max-height: 150px; overflow-y: auto; }
         .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
         .chat-scroll li { margin: 3px 0; }
+
+        /*
+         * .chat-form 聊天输入表单
+         * padding: 10px — 内边距
+         * display: flex — 弹性布局，输入框和按钮横向排列
+         * gap: 5px — 输入框和按钮间距
+         */
         .chat-form { padding: 10px; display: flex; gap: 5px; }
+
+        /*
+         * #waitMessage 等待提示区域
+         * display: none — 默认隐藏，非自己行动时显示
+         */
         #waitMessage { display: none; }
 
-        /* 规则按钮（点击弹出，不受刷新影响） */
+        /* ===== 规则按钮（固定定位，点击弹出，不受页面滚动影响） ===== */
+
+        /*
+         * .rules-container 规则按钮容器
+         * position: fixed — 固定定位，始终在视口右上角
+         * top: 15px — 距顶部 15px
+         * right: 20px — 距右边 20px
+         * z-index: 1000 — 最高层级，确保不被其他元素遮挡
+         */
         .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+
+        /*
+         * .rules-btn 规则按钮
+         * padding: 8px 16px — 上下 8px，左右 16px
+         * background: #3498db — 蓝色背景
+         * color: white — 白色文字
+         * border: none — 无边框
+         * border-radius: 6px — 圆角 6px
+         * cursor: pointer — 手型指针
+         * font-size: 14px — 字体大小
+         */
         .rules-btn {
             padding: 8px 16px; background: #3498db; color: white; border: none;
             border-radius: 6px; cursor: pointer; font-size: 14px;
         }
+
+        /*
+         * .rules-popup 规则弹窗
+         * display: none — 默认隐藏
+         * position: absolute — 相对于 .rules-container 定位
+         * right: 0 — 右对齐
+         * top: 100% — 紧贴按钮下方
+         * margin-top: 5px — 与按钮的额外间距
+         * width: max-content — 宽度自适应内容
+         * max-width: 90vw — 最大宽度不超过视口 90%，防止溢出
+         * max-height: 24em — 最大高度约 24 行文字
+         * overflow-y: auto — 内容超出时垂直滚动
+         * background: #fff — 白色背景
+         * border: 2px solid #3498db — 2px 蓝色边框
+         * border-radius: 8px — 圆角 8px
+         * box-shadow: 0 4px 12px rgba(0,0,0,0.3) — 阴影：x偏移0 y偏移4px 模糊12px 30%透明度黑色
+         * padding: 15px — 内边距
+         * font-size: 13px — 规则文字大小
+         * line-height: 1.6 — 行高 1.6 倍，增加可读性
+         * color: #333 — 深灰色文字
+         * text-align: left — 左对齐
+         * white-space: normal — 正常换行
+         * word-wrap: break-word — 长单词自动断行
+         */
         .rules-popup {
             display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
             width: max-content; max-width: 90vw;
@@ -48,21 +294,53 @@
             text-align: left;
             white-space: normal; word-wrap: break-word;
         }
+
+        /*
+         * .rules-popup.show 弹窗显示状态
+         * display: block — 块级显示
+         */
         .rules-popup.show { display: block; }
+
+        /*
+         * .rules-title 弹窗标题
+         * text-align: center — 居中
+         * font-weight: bold — 加粗
+         * margin-bottom: 10px — 与正文间距
+         * font-size: 14px — 字号
+         */
         .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+
+        /*
+         * .rules-popup p 规则段落
+         * margin: 4px 0 — 上下间距 4px，紧凑排版
+         */
         .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!--
+  ==================== 规则弹窗 ====================
+  功能: 固定定位在右上角，点击"📜 规则"按钮展开/收起游戏规则说明
+  状态存储: sessionStorage 中 key 为 'rulesPopupVisible_' + roomId
+           值为 'true'/'false'，页面刷新后可恢复展开状态
+  全局点击监听: 点击容器外部自动关闭弹窗
+-->
 <div class="rules-container">
+    <!--
+      onclick="toggleRules()" — 点击切换弹窗展开/收起
+    -->
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <!--
+      id="rulesPopup" — 弹窗容器，通过 classList.toggle('show') 控制显隐
+      内容: 马刀游戏完整规则（14条规则说明）
+    -->
     <div class="rules-popup" id="rulesPopup">
         <div class="rules-title">马刀游戏规则</div>
         <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
         <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
         <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
-        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制或平局的玩家数，</p>
         <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
         <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
         <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
@@ -74,67 +352,234 @@
     </div>
 </div>
 
+<!--
+  ==================== 玩家状态面板 ====================
+  由 updatePlayers(data.players) 动态渲染
+  data.players 来源: GET /api/room/{roomId}?playerId={playerId} 响应中的 players 数组
+  每张卡片显示: 名称、是否自己、马/刀持有状态、HP、位置、步数、血祭buff
+-->
 <div class="status-box">
     <h4>📋 玩家状态</h4>
+    <!--
+      id="playersContainer" — 玩家卡片渲染目标容器
+      初始显示 "加载中..."，fetchState() 完成后替换为实际卡片
+    -->
     <div class="players-container" id="playersContainer"><p>加载中...</p></div>
 </div>
 
+<!--
+  ==================== 行动操作区域 ====================
+  默认隐藏 (display:none)，仅当 isCurrentActionPlayer==true 且 currentPlayerSteps>0 时显示
+  包含: 行动按钮组 → 目标选择区 → 城市选择区 → 最终确认按钮
+-->
 <div id="actionArea" style="display: none;">
     <h3>请选择你要执行的操作：</h3>
+
+    <!--
+      id="actionButtons" — 行动按钮容器
+      由 showActionUI(data) 根据 data.availableActions 动态生成按钮
+      data.availableActions[] 每项包含:
+        - index:       int    - 按钮序号（仅展示用）
+        - actionType:  int    - 行动类型编码 (0=放弃 1=移动 2=买马 3=买刀 4=踢 5=刺 6=血祭 7=撵进去)
+        - name:        String - 中文名称（"放弃"/"移动"/"买马"等）
+    -->
     <div id="actionButtons"></div>
+
+    <!--
+      ========== 行动提交表单 ==========
+      POST /api/action/{roomId}/{playerId}
+      请求参数:
+        - actionType: int (必填) — 行动类型 0-7
+        - targetId:   String (可选) — 目标玩家UUID，仅踢(4)/刺(5)/撵进去(7)需要
+        - city:       String (可选) — 目标城市名如 "city-3"，仅城外移动(1)/撵进去(7)需要
+      响应格式: 与 /api/room 相同的 JSON 结构 + 额外字段 actionMessage
+    -->
     <form id="actionForm">
+        <!--
+          name="actionType" id="actionTypeInput"
+          隐藏域，存储当前选中的行动类型编码 (0-7)
+          value 由 selectAction() 设置，submitAction() 读取并发送
+        -->
         <input type="hidden" name="actionType" id="actionTypeInput" value="">
+
+        <!--
+          ===== 目标选择区 =====
+          id="targetSection" — 默认隐藏
+          显示条件: actionType 为 4(踢) / 5(刺) / 7(撵进去) 时需要选择目标玩家
+          select name="targetId" — 下拉选项由 data.targets[] 填充
+          data.targets[] 每项: {id: String(UUID), name: String(昵称), hp: int(生命值)}
+        -->
         <div id="targetSection" class="section">
             <label>选择目标：</label>
             <select name="targetId" id="targetSelect"><option value="">-- 请选择 --</option></select>
         </div>
+
+        <!--
+          ===== 城市选择区 =====
+          id="citySection" — 默认隐藏
+          显示条件:
+            - 移动(1) 且 currentPlayerLocation == "outside"（在城外移动需要选择进城）
+            - 撵进去(7)（需要选择把目标撵入哪个城）
+          select name="city" — 下拉选项由 data.cities[] 填充
+          data.cities[]: String[] — 城市名称列表，如 ["city-1", "city-2", ...]
+        -->
         <div id="citySection" class="section">
             <label>选择城市：</label>
             <select name="city" id="citySelect"><option value="">-- 请选择 --</option></select>
         </div>
         <br/>
+        <!--
+          id="finalSubmit" type="button" — 最终确认按钮，默认隐藏
+          显示条件: 选择了需要参数的操作并完成目标/城市选择后
+          点击后验证必填参数 → 保存到 pendingAction → 调用 submitAction()
+        -->
         <button type="button" id="finalSubmit">最终确认行动</button>
     </form>
 </div>
 
+<!--
+  ==================== 等待提示区域 ====================
+  默认隐藏，当不是自己行动时（!isCurrentActionPlayer 或 currentPlayerSteps==0）显示
+  显示内容: 当前正在行动的玩家名称 + 剩余步数
+  数据来源: data.currentActionPlayer (String) 和 data.currentActionSteps (int)
+-->
 <div id="waitMessage">
     <h2>等待其他玩家行动...</h2>
+    <!--
+      id="waitDetail" — 等待详情容器
+      由 showWaitingUI(data) 动态更新内容
+      格式: "正在等待 <strong>玩家名</strong> 行动（剩余 N 步）"
+    -->
     <div id="waitDetail"></div>
 </div>
 
+<!--
+  ==================== 操作记录面板 ====================
+  由 updateLogs(data.actionLogs) 动态渲染
+  data.actionLogs: List<String> — 行动日志列表（最多30条）
+  带粘性标题 + 滚动区，新消息自动滚到底部
+-->
 <div class="log-box">
     <h4>📜 操作记录</h4>
-    <div class="log-scroll" id="logScroll"><ul id="logList"></ul></div>
+    <div class="log-scroll" id="logScroll">
+        <!--
+          id="logList" — 日志列表 <ul>
+        -->
+        <ul id="logList"></ul>
+    </div>
 </div>
 
+<!--
+  ==================== 聊天面板 ====================
+  由 updateChat(data.chatMessages) 动态渲染
+  data.chatMessages: List<String> — 聊天消息列表（最多50条）
+  支持发送消息: POST /api/chat/{roomId}/{playerId}，参数 message (FormData)
+  发送后立即再次 fetch /api/room 刷新聊天内容
+-->
 <div class="chat-box">
     <h4>💬 聊天</h4>
-    <div class="chat-scroll" id="chatScroll"><ul id="chatList"></ul></div>
+    <div class="chat-scroll" id="chatScroll">
+        <!--
+          id="chatList" — 聊天消息列表 <ul>
+        -->
+        <ul id="chatList"></ul>
+    </div>
+    <!--
+      id="chatForm" — 聊天表单
+      submit 事件: 阻止默认提交 → 读取 chatInput 值 → POST /api/chat/{roomId}/{playerId}
+      autocomplete="off" — 禁用浏览器自动填充，避免干扰
+    -->
     <form id="chatForm" class="chat-form">
+        <!--
+          id="chatInput" placeholder="输入消息..." required
+          style="width:70%" — 输入框占表单宽度 70%
+        -->
         <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
         <button type="submit">发送</button>
     </form>
 </div>
 
+<!--
+  ===================================================================
+  页面交互脚本（Thymeleaf 内联模式）
+  th:inline="javascript" 启用 Thymeleaf JS 内联，支持 /*[[...]]*/ 语法
+  ===================================================================
+-->
 <script th:inline="javascript">
+
+    // roomId: 房间 UUID 字符串
+    // 由 Thymeleaf 内联表达式 /*[[${roomId}]]*/ 在服务端渲染时替换
+    // 来源: GameController 中 model.addAttribute("roomId", roomId)
+    // 类型: string（36位 UUID 格式，如 "a1b2c3d4-...-ef1234567890"）
     var roomId = /*[[${roomId}]]*/ '';
+
+    // playerId: 当前玩家 UUID 字符串
+    // 由 Thymeleaf 内联表达式 /*[[${playerId}]]*/ 在服务端渲染时替换
+    // 来源: GameController 中 model.addAttribute("playerId", playerId)
+    // 类型: string（36位 UUID 格式）
     var playerId = /*[[${playerId}]]*/ '';
+
+    /*
+     * currentData: Object|null
+     * 缓存最近一次 /api/room 返回的完整 JSON 数据
+     * 用于 selectAction()、restorePendingAction() 等函数中读取
+     *   currentPlayerLocation、availableActions、targets、cities 等字段
+     * 初始值: null（页面加载后由 fetchState() 填充）
+     */
     var currentData = null;
+
+    /*
+     * pendingAction: Object
+     * 暂存用户正在进行的行动选择，用于页面刷新后恢复状态
+     * 字段:
+     *   - type:     int|null    — 当前选中的 actionType (0-7)，未选择时为 null
+     *   - targetId: String      — 选中的目标玩家 UUID，默认为 ''
+     *   - city:     String      — 选中的目标城市名，默认为 ''
+     * 初始值: { type: null, targetId: '', city: '' }
+     * 恢复机制: showActionUI() 末尾调用 restorePendingAction(data) 恢复之前的选中状态
+     */
     var pendingAction = { type: null, targetId: '', city: '' };
 
     // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
+
+    /*
+     * RULES_KEY: String
+     * sessionStorage 存储键名，格式: 'rulesPopupVisible_' + roomId
+     * 每个房间独立保存弹窗展开状态，不同房间互不影响
+     */
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
+
+    /*
+     * toggleRules() — 切换规则弹窗展开/收起
+     * 无参数，无返回值
+     * 副作用: 修改 #rulesPopup 的 classList（添加/移除 'show'）
+     *        更新 sessionStorage[RULES_KEY] 的值
+     */
     function toggleRules() {
         var popup = document.getElementById('rulesPopup');
         popup.classList.toggle('show');
         sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
     }
+
+    /*
+     * restoreRulesPopup() — 页面加载/刷新时恢复弹窗状态
+     * 从 sessionStorage 读取上次的展开状态
+     * 如果之前是展开的 (值为 'true')，则自动显示弹窗
+     */
     function restoreRulesPopup() {
         var popup = document.getElementById('rulesPopup');
         if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
             popup.classList.add('show');
         }
     }
+
+    /*
+     * 全局点击监听 — 点击规则容器外部时自动关闭弹窗
+     * @param e: MouseEvent — 点击事件对象
+     * e.target: 被点击的 DOM 元素
+     * container.contains(e.target): 判断点击是否在 .rules-container 内部
+     * 如果点击在外部 → 移除 'show' 类 → 更新 sessionStorage 为 false
+     */
     window.addEventListener('click', function(e) {
         var container = document.querySelector('.rules-container');
         if (!container.contains(e.target)) {
@@ -145,60 +590,160 @@
     });
 
     // ========== 游戏逻辑 ==========
+
+    /*
+     * fetchState() — 异步获取游戏状态（核心轮询函数）
+     *
+     * API 调用: GET /api/room/{roomId}?playerId={playerId}
+     *
+     * 响应 JSON 数据结构（完整字段）:
+     *   - roomId:                 String   — 房间 UUID
+     *   - status:                 String   — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
+     *   - phase:                  String   — 当前阶段: "GUESS" / "ACTION"
+     *   - round:                  int      — 当前回合数
+     *   - winner:                 String   — 胜利者名称（FINISHED 时有值，否则 null）
+     *   - playerCount:            int      — 房间最大玩家数
+     *   - players:                Array    — 所有玩家信息列表
+     *     [].id:                  String   — 玩家 UUID
+     *     [].name:                String   — 玩家昵称
+     *     [].hp:                  int      — 生命值（0 表示死亡）
+     *     [].steps:               int      — 当前步数
+     *     [].horse:               boolean  — 是否拥有马
+     *     [].knife:               boolean  — 是否拥有刀
+     *     [].buff:                boolean  — 是否有血祭 buff
+     *     [].location:            String   — 位置 ("city-N" 或 "outside")
+     *     [].alive:               boolean  — 是否存活
+     *     [].guess:               String   — 猜拳手势 ("石头"/"剪刀"/"布"/null)
+     *   - currentPlayerId:        String   — 当前玩家 UUID
+     *   - currentPlayerName:      String   — 当前玩家昵称
+     *   - currentPlayerAlive:     boolean  — 当前玩家是否存活
+     *   - currentPlayerGuess:     String   — 当前玩家的猜拳手势
+     *   - currentPlayerSteps:     int      — 当前玩家剩余步数
+     *   - currentPlayerLocation:  String   — 当前玩家位置
+     *   - currentPlayerHorse:     boolean  — 当前玩家是否拥有马
+     *   - currentPlayerKnife:     boolean  — 当前玩家是否拥有刀
+     *   - currentPlayerBuff:      boolean  — 当前玩家是否有血祭 buff
+     *   - isCurrentActionPlayer:  boolean  — 是否轮到当前玩家行动
+     *   - actionLogs:             Array    — 行动日志（String[]，最多30条）
+     *   - chatMessages:           Array    — 聊天消息（String[]，最多50条）
+     *   - currentActionPlayer:    String   — 当前正在行动的玩家名称（非自己时用于等待提示）
+     *   - currentActionSteps:     int      — 当前行动者的剩余步数
+     *   - availableActions:       Array    — 可用行动列表（仅轮到当前玩家时返回）
+     *     [].index:               int      — 序号
+     *     [].actionType:          int      — 行动类型编码 0-7
+     *     [].name:                String   — 中文名称
+     *   - targets:                Array    — 可攻击目标列表（仅轮到当前玩家时返回）
+     *     [].id:                  String   — 目标 UUID
+     *     [].name:                String   — 目标昵称
+     *     [].hp:                  int      — 目标生命值
+     *   - cities:                 Array    — 城市列表（String[]，如 ["city-1","city-2",...]）
+     *
+     * 跳转逻辑（5种情况）:
+     *   1. !data.status → 房间不存在 → 跳转到首页 /
+     *   2. data.status === 'FINISHED' → 游戏结束 → 跳转到结果页 /game/{roomId}/{playerId}
+     *   3. !data.currentPlayerAlive → 玩家已死亡 → 跳转到观战页 /game/{roomId}/{playerId}
+     *   4. data.phase !== 'ACTION' → 阶段切换 → 跳转到猜拳页 /game/{roomId}/{playerId}
+     *   5. data.isCurrentActionPlayer && data.currentPlayerSteps > 0 → 显示行动 UI
+     *   6. 否则 → 显示等待 UI（不是自己行动或无步数）
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用: 更新 currentData、页面 UI（玩家卡片/日志/聊天/行动区/等待区）
+     */
     async function fetchState() {
         try {
+            // 构建 API URL: /api/room/{roomId}?playerId={playerId}
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
             var res = await fetch(url);
             if (!res.ok) return;
             var data = await res.json();
+
+            // data.status: String — 房间状态，为 null/undefined 表示房间不存在
             if (!data.status) { window.location.href = '/'; return; }
+
             currentData = data;
 
-            updatePlayers(data.players);
-            updateLogs(data.actionLogs);
-            updateChat(data.chatMessages);
+            // 更新三个 UI 面板
+            updatePlayers(data.players);   // 参数: data.players — Array<Player>
+            updateLogs(data.actionLogs);   // 参数: data.actionLogs — Array<String>
+            updateChat(data.chatMessages); // 参数: data.chatMessages — Array<String>
 
+            // 跳转判断 1: 游戏结束 → 结果页
             if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; return; }
+            // 跳转判断 2: 玩家死亡 → 观战页
             if (!data.currentPlayerAlive) { window.location.href = '/game/' + roomId + '/' + playerId; return; }
+            // 跳转判断 3: 不在行动阶段 → 猜拳页
             if (data.phase !== 'ACTION') { window.location.href = '/game/' + roomId + '/' + playerId; return; }
 
+            // 跳转判断 4/5:
+            // isCurrentActionPlayer: boolean — 是否轮到当前玩家
+            // currentPlayerSteps: int — 当前玩家剩余步数（>0 表示还有行动机会）
             if (data.isCurrentActionPlayer && data.currentPlayerSteps > 0) {
-                showActionUI(data);
+                showActionUI(data);  // 显示行动操作界面
             } else {
-                pendingAction.type = null;
-                showWaitingUI(data);
+                pendingAction.type = null;  // 清空暂存的操作选择
+                showWaitingUI(data);        // 显示等待界面
             }
 
-            // ★ 恢复规则弹窗状态
+            // ★ 恢复规则弹窗状态（每次轮询后都尝试恢复，确保弹窗状态不丢失）
             restoreRulesPopup();
         } catch (e) { console.error(e); }
     }
 
+    /*
+     * showActionUI(data) — 显示行动操作界面
+     *
+     * 功能:
+     *   1. 显示 #actionArea，隐藏 #waitMessage
+     *   2. 根据 data.availableActions 动态生成行动按钮
+     *   3. 根据 data.targets 填充目标下拉选项
+     *   4. 根据 data.cities 填充城市下拉选项
+     *   5. 隐藏 targetSection/citySection/finalSubmit
+     *   6. 调用 restorePendingAction(data) 恢复之前的选择状态
+     *
+     * @param data: Object — /api/room 返回的完整 JSON 数据
+     *   data.availableActions: Array<{index:int, actionType:int, name:string}>
+     *   data.targets: Array<{id:string, name:string, hp:int}>
+     *   data.cities: Array<string> — 如 ["city-1", "city-2", "city-3", "city-4"]
+     *   data.currentPlayerLocation: string — 当前玩家位置，用于判断移动/撵入逻辑
+     */
     function showActionUI(data) {
         document.getElementById('actionArea').style.display = 'block';
         document.getElementById('waitMessage').style.display = 'none';
 
+        // 生成行动按钮
         var buttonsContainer = document.getElementById('actionButtons');
-        buttonsContainer.innerHTML = '';
+        buttonsContainer.innerHTML = '';  // 清空旧按钮
         if (data.availableActions) {
+            // 遍历可用行动列表
             for (var i = 0; i < data.availableActions.length; i++) {
                 var act = data.availableActions[i];
+                // act.actionType: int — 行动类型编码 0-7
+                // act.name: String — 中文显示名（"放弃"/"移动"/"买马"等）
                 var btn = document.createElement('button');
                 btn.className = 'action-btn';
                 btn.textContent = act.name;
                 btn.setAttribute('data-action', act.actionType);
+
+                // 使用 IIFE（立即执行函数）闭包捕获当前的 act.actionType
+                // 避免循环中闭包引用问题：所有按钮回调都引用最后一个 act
                 btn.addEventListener('click', (function(type) {
+                    // @param type: int — 闭包捕获的 actionType 值
                     return function() { selectAction(type, data); };
                 })(act.actionType));
                 buttonsContainer.appendChild(btn);
             }
         }
 
+        // 填充目标下拉选项
         var targetSelect = document.getElementById('targetSelect');
         targetSelect.innerHTML = '<option value="">-- 请选择 --</option>';
         if (data.targets) {
             for (var j = 0; j < data.targets.length; j++) {
                 var t = data.targets[j];
+                // t.id:   String — 目标玩家 UUID
+                // t.name: String — 目标玩家昵称
+                // t.hp:   int    — 目标玩家生命值
                 var opt = document.createElement('option');
                 opt.value = t.id;
                 opt.textContent = t.name + ' (HP:' + t.hp + ')';
@@ -206,11 +751,12 @@
             }
         }
 
+        // 填充城市下拉选项
         var citySelect = document.getElementById('citySelect');
         citySelect.innerHTML = '<option value="">-- 请选择 --</option>';
         if (data.cities) {
             for (var k = 0; k < data.cities.length; k++) {
-                var city = data.cities[k];
+                var city = data.cities[k];  // city: String — 城市名如 "city-3"
                 var opt = document.createElement('option');
                 opt.value = city;
                 opt.textContent = city;
@@ -218,26 +764,53 @@
             }
         }
 
+        // 重置：隐藏所有参数区域和确认按钮，等待用户选择操作
         document.getElementById('targetSection').style.display = 'none';
         document.getElementById('citySection').style.display = 'none';
         document.getElementById('finalSubmit').style.display = 'none';
 
+        // 如果之前有暂存的操作选择（页面刷新场景），恢复之前的状态
         restorePendingAction(data);
     }
 
+    /*
+     * restorePendingAction(data) — 恢复暂存的操作选择状态
+     *
+     * 使用场景: 页面刷新后，pendingAction 丢失但用户可能希望恢复之前的选择
+     *          实际在当前实现中，pendingAction 是内存变量，刷新后会重置
+     *          此函数主要用于轮询过程中 UI 重建后恢复选中状态
+     *
+     * 逻辑:
+     *   1. 如果 pendingAction.type 为 null（未选择），直接返回
+     *   2. 设置 actionTypeInput 的 value
+     *   3. 如果操作类型需要目标（4/5/7），显示目标选择区并恢复选中值
+     *   4. 如果操作类型需要城市（城外移动1/撵进去7），显示城市选择区并恢复选中值
+     *   5. 显示最终确认按钮
+     *
+     * @param data: Object — /api/room 返回的完整 JSON 数据
+     *   data.currentPlayerLocation: String — 当前玩家位置
+     */
     function restorePendingAction(data) {
         if (!pendingAction.type) return;
-        var type = pendingAction.type;
+        var type = pendingAction.type;  // type: int — 暂存的 actionType
+
+        // 设置隐藏域的值
         document.getElementById('actionTypeInput').value = type;
 
+        // 需要目标玩家的操作: 4=踢, 5=刺, 7=撵进去
         if (type === 4 || type === 5 || type === 7) {
             document.getElementById('targetSection').style.display = 'block';
             var targetSelect = document.getElementById('targetSelect');
+            // 检查暂存的目标ID是否仍在当前可选列表中
+            // Array.from(targetSelect.options): 将 HTMLOptionsCollection 转为数组
+            // .some(opt => opt.value === pendingAction.targetId): 查找匹配的选项
             if (pendingAction.targetId && Array.from(targetSelect.options).some(opt => opt.value === pendingAction.targetId)) {
                 targetSelect.value = pendingAction.targetId;
             } else targetSelect.value = '';
         }
 
+        // 需要城市的操作: 移动(1)且在城外 或 撵进去(7)
+        // data.currentPlayerLocation === 'outside': 当前玩家在城外
         if ((type === 1 && data.currentPlayerLocation === 'outside') || type === 7) {
             document.getElementById('citySection').style.display = 'block';
             var citySelect = document.getElementById('citySelect');
@@ -249,89 +822,204 @@
         document.getElementById('finalSubmit').style.display = 'inline-block';
     }
 
+    /*
+     * showWaitingUI(data) — 显示等待其他玩家行动的界面
+     *
+     * 显示条件: !data.isCurrentActionPlayer 或 data.currentPlayerSteps == 0
+     *
+     * 显示内容:
+     *   - 如果 data.currentActionPlayer 有值: "正在等待 玩家名 行动（剩余 N 步）"
+     *   - 如果无值: "等待其他玩家行动..."
+     *
+     * @param data: Object — /api/room 返回的完整 JSON 数据
+     *   data.currentActionPlayer: String|null — 当前正在行动的玩家名称
+     *   data.currentActionSteps:  int — 当前行动者的剩余步数
+     */
     function showWaitingUI(data) {
         document.getElementById('actionArea').style.display = 'none';
         document.getElementById('waitMessage').style.display = 'block';
         var detailDiv = document.getElementById('waitDetail');
         if (data.currentActionPlayer) {
             var detail = '<p>正在等待 <strong>' + data.currentActionPlayer + '</strong> 行动';
+            // currentActionSteps > 0 时显示剩余步数
             if (data.currentActionSteps > 0) detail += '（剩余 ' + data.currentActionSteps + ' 步）</p>';
             else detail += '</p>';
             detailDiv.innerHTML = detail;
         } else detailDiv.innerHTML = '<p>等待其他玩家行动...</p>';
     }
 
+    /*
+     * selectAction(actionType, data) — 用户点击某个行动按钮后的处理
+     *
+     * 操作类型与 UI 展示规则:
+     *   actionType = 0 (放弃)  → 无需参数，直接提交
+     *   actionType = 1 (移动)  → 城外需要选城市，城内直接提交
+     *   actionType = 2 (买马)  → 无需参数，直接提交
+     *   actionType = 3 (买刀)  → 无需参数，直接提交
+     *   actionType = 4 (踢)    → 需要选目标，无需选城市
+     *   actionType = 5 (刺)    → 需要选目标，无需选城市
+     *   actionType = 6 (血祭)  → 无需参数，直接提交
+     *   actionType = 7 (撵进去)→ 需要选目标 + 选城市
+     *
+     * @param actionType: int — 行动类型编码 0-7
+     * @param data: Object — /api/room 返回的完整 JSON 数据
+     *   data.currentPlayerLocation: String — 当前玩家位置 ("city-N" 或 "outside")
+     */
     function selectAction(actionType, data) {
+        // 设置隐藏域值
         document.getElementById('actionTypeInput').value = actionType;
+
+        // 重置：隐藏所有参数区域
         document.getElementById('targetSection').style.display = 'none';
         document.getElementById('citySection').style.display = 'none';
         document.getElementById('finalSubmit').style.display = 'none';
 
+        // 暂存当前选择
         pendingAction.type = actionType;
 
+        // 需要目标玩家的操作: 踢(4)/刺(5)/撵进去(7)
         if (actionType === 4 || actionType === 5 || actionType === 7) {
             document.getElementById('targetSection').style.display = 'block';
             document.getElementById('targetSelect').value = pendingAction.targetId || '';
         }
 
+        // 需要城市的操作: 移动(1)且在城外 或 撵进去(7)
         if ((actionType === 1 && data.currentPlayerLocation === 'outside') || actionType === 7) {
             document.getElementById('citySection').style.display = 'block';
             document.getElementById('citySelect').value = pendingAction.city || '';
         }
 
+        // 无需参数的即时提交操作: 放弃(0)/买马(2)/买刀(3)/血祭(6)
         if (actionType === 0 || actionType === 2 || actionType === 3 || actionType === 6) {
-            pendingAction.type = null;
+            pendingAction.type = null;  // 清空暂存（已提交）
             submitAction();
             return;
         }
+
+        // 移动(1)且在城内 → 直接移动（城内→城外），无需选城市
         if (actionType === 1 && data.currentPlayerLocation !== 'outside') {
             pendingAction.type = null;
             submitAction();
             return;
         }
 
+        // 需要参数的操作 → 显示最终确认按钮，等待用户选择目标/城市
         document.getElementById('finalSubmit').style.display = 'inline-block';
     }
 
+    /*
+     * submitAction() — 提交行动到后端
+     *
+     * API 调用: POST /api/action/{roomId}/{playerId}
+     *
+     * 请求参数 (FormData):
+     *   - actionType: int (必填)    — 行动类型编码 0-7
+     *   - targetId:   String (可选) — 目标玩家 UUID
+     *   - city:       String (可选) — 目标城市名
+     *
+     * 响应: 与 /api/room 相同的 JSON 结构 + actionMessage 字段
+     *
+     * @async
+     * 无参数（从 DOM 元素读取 actionType/targetId/city）
+     * 副作用: 清空 pendingAction.type，调用 fetchState() 刷新页面
+     */
     async function submitAction() {
         var actionType = document.getElementById('actionTypeInput').value;
-        if (!actionType) return;
+        if (!actionType) return;  // 未选择操作类型，不提交
+
+        // 构建 FormData
         var formData = new FormData();
-        formData.append('actionType', actionType);
+        formData.append('actionType', actionType);       // int — 行动类型
         var targetId = document.getElementById('targetSelect').value;
         var city = document.getElementById('citySelect').value;
-        if (targetId) formData.append('targetId', targetId);
-        if (city) formData.append('city', city);
+        if (targetId) formData.append('targetId', targetId);  // String — 目标玩家 UUID
+        if (city) formData.append('city', city);               // String — 目标城市名
+
         try {
+            // POST 提交行动
             await fetch('/api/action/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            pendingAction.type = null;
-            fetchState();
+            pendingAction.type = null;  // 清空暂存状态
+            fetchState();               // 立即刷新页面状态
         } catch (e) { console.error(e); }
     }
 
+    /*
+     * 最终确认按钮点击事件
+     *
+     * 验证逻辑:
+     *   1. 如果目标选择区可见且未选择目标 → alert 提示
+     *   2. 如果城市选择区可见且未选择城市 → alert 提示
+     *   3. 验证通过 → 保存 targetId/city 到 pendingAction → 调用 submitAction()
+     *
+     * 副作用: 更新 pendingAction.targetId、pendingAction.city
+     */
     document.getElementById('finalSubmit').addEventListener('click', function() {
         var targetSelect = document.getElementById('targetSelect');
         var citySelect = document.getElementById('citySelect');
+
+        // 目标必填校验: 目标区可见但未选择
         if (document.getElementById('targetSection').style.display === 'block' && targetSelect.value === '') {
             alert('请选择一个目标玩家！'); return;
         }
+        // 城市必填校验: 城市区可见但未选择
         if (document.getElementById('citySection').style.display === 'block' && citySelect.value === '') {
             alert('请选择一个城市！'); return;
         }
-        pendingAction.targetId = targetSelect.value;
-        pendingAction.city = citySelect.value;
+
+        // 保存选择到暂存对象
+        pendingAction.targetId = targetSelect.value;  // String — 目标 UUID
+        pendingAction.city = citySelect.value;        // String — 目标城市名
         submitAction();
     });
 
-    document.getElementById('targetSelect').addEventListener('change', function() { pendingAction.targetId = this.value; });
-    document.getElementById('citySelect').addEventListener('change', function() { pendingAction.city = this.value; });
+    // 目标下拉框变化时同步更新 pendingAction.targetId
+    document.getElementById('targetSelect').addEventListener('change', function() {
+        // this.value: String — 当前选中的目标 UUID
+        pendingAction.targetId = this.value;
+    });
 
+    // 城市下拉框变化时同步更新 pendingAction.city
+    document.getElementById('citySelect').addEventListener('change', function() {
+        // this.value: String — 当前选中的城市名
+        pendingAction.city = this.value;
+    });
+
+    /*
+     * updatePlayers(players) — 更新玩家状态卡片
+     *
+     * 渲染每个玩家的信息卡片，包含:
+     *   - 玩家名称 + "（我）" 标识
+     *   - 🐴 马: 有/无
+     *   - 🔪 刀: 有/无
+     *   - ❤️ HP: 生命值
+     *   - 📍 位置: 城市名或城外
+     *   - 👣 步数: 仅步数 > 0 时显示
+     *   - 🔥 血祭: 仅 buff==true 且存活时显示
+     *
+     * CSS 类控制:
+     *   - .current: p.id === playerId（高亮自己）
+     *   - .dead: p.hp <= 0（灰色死亡样式）
+     *
+     * @param players: Array<Object> — 玩家信息数组
+     *   每项字段:
+     *     p.id:       String  — 玩家 UUID
+     *     p.name:     String  — 玩家昵称
+     *     p.hp:       int     — 生命值
+     *     p.horse:    boolean — 是否有马
+     *     p.knife:    boolean — 是否有刀
+     *     p.buff:     boolean — 是否有血祭 buff
+     *     p.location: String  — 位置
+     *     p.steps:    int     — 步数
+     */
     function updatePlayers(players) {
         var container = document.getElementById('playersContainer');
         var html = '';
         for (var i = 0; i < players.length; i++) {
-            var p = players[i]; var isMe = p.id === playerId;
-            var deadClass = p.hp <= 0 ? ' dead' : ''; var currentClass = isMe ? ' current' : '';
+            var p = players[i];
+            var isMe = p.id === playerId;  // boolean — 是否是自己
+            var deadClass = p.hp <= 0 ? ' dead' : '';
+            var currentClass = isMe ? ' current' : '';
+
             html += '<div class="player-card' + currentClass + deadClass + '">';
             html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
             html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p><p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
@@ -343,45 +1031,105 @@
         container.innerHTML = html;
     }
 
+    /*
+     * updateLogs(logs) — 更新操作记录列表
+     *
+     * 优化: 仅当日志数量变化时才重新渲染（避免频繁 DOM 操作）
+     * 新消息自动滚动到底部
+     *
+     * @param logs: Array<String> — 操作日志列表（来自 data.actionLogs）
+     *   每条日志格式如: "张三 移动到城外" / "李四 刺了王五（伤害1）"
+     */
     function updateLogs(logs) {
         var logList = document.getElementById('logList');
+        // logList.children.length: int — 当前 DOM 中已有的 <li> 数量
+        // 仅当数量变化时才重建 HTML，减少不必要的 DOM 操作
         if (logList.children.length !== logs.length) {
-            var html = ''; for (var i = 0; i < logs.length; i++) html += '<li>' + logs[i] + '</li>';
+            var html = '';
+            for (var i = 0; i < logs.length; i++) html += '<li>' + logs[i] + '</li>';
             logList.innerHTML = html;
+            // 自动滚动到最新日志
+            // scrollTop: 滚动位置; scrollHeight: 内容总高度
             document.getElementById('logScroll').scrollTop = document.getElementById('logScroll').scrollHeight;
         }
     }
 
+    /*
+     * updateChat(messages) — 更新聊天消息列表
+     *
+     * 优化: 比较 DOM 内容与数据，仅在内容变化时重新渲染
+     * 新消息自动滚动到底部
+     *
+     * @param messages: Array<String> — 聊天消息列表（来自 data.chatMessages）
+     *   每条格式如: "张三：大家好" / "李四：加油"
+     */
     function updateChat(messages) {
         var chatList = document.getElementById('chatList');
+        // 快速检查：数量不同肯定需要更新
         var needUpdate = chatList.children.length !== messages.length;
         if (!needUpdate) {
-            for (var i = 0; i < messages.length; i++) if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
+            // 数量相同但内容不同时也需要更新
+            for (var i = 0; i < messages.length; i++) {
+                // chatList.children[i].textContent: String — 当前 DOM 中第 i 条消息的文本
+                // messages[i]: String — API 返回的第 i 条消息
+                if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
+            }
         }
         if (needUpdate) {
-            var html = ''; for (var i = 0; i < messages.length; i++) html += '<li>' + messages[i] + '</li>';
+            var html = '';
+            for (var i = 0; i < messages.length; i++) html += '<li>' + messages[i] + '</li>';
             chatList.innerHTML = html;
+            // 自动滚动到最新消息
             document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
         }
     }
 
+    /*
+     * 聊天表单提交事件
+     *
+     * API 调用: POST /api/chat/{roomId}/{playerId}
+     * 请求参数 (FormData):
+     *   - message: String — 聊天内容
+     *
+     * 流程:
+     *   1. 阻止默认表单提交 (e.preventDefault())
+     *   2. 读取 chatInput 值，空消息直接返回
+     *   3. POST 发送消息到后端
+     *   4. 清空输入框
+     *   5. 立即再次 fetch /api/room 获取最新聊天列表并更新
+     *
+     * @param e: Event — 表单提交事件对象
+     */
     document.getElementById('chatForm').addEventListener('submit', async function(e) {
         e.preventDefault();
-        var input = document.getElementById('chatInput'); var message = input.value.trim();
+        var input = document.getElementById('chatInput');
+        var message = input.value.trim();  // String — 去除首尾空白的消息内容
         if (!message) return;
-        var formData = new FormData(); formData.append('message', message);
+
+        var formData = new FormData();
+        formData.append('message', message);  // String — 聊天内容
+
         try {
+            // POST 发送聊天消息
             await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';
+            input.value = '';  // 清空输入框
+
+            // 立即获取最新聊天消息并更新 UI
             var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
             var data = await res.json();
-            updateChat(data.chatMessages);
+            updateChat(data.chatMessages);  // data.chatMessages: Array<String>
         } catch (err) { console.error(err); }
     });
 
-    // 初始恢复规则弹窗状态
+    // ===== 页面初始化 =====
+
+    // 初始恢复规则弹窗状态（页面首次加载时）
     restoreRulesPopup();
+
+    // 首次获取游戏状态
     fetchState();
+
+    // 每 2000 毫秒（2秒）轮询一次游戏状态
     setInterval(fetchState, 2000);
 </script>
 </body>

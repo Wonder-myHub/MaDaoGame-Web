@@ -1,39 +1,239 @@
 <!DOCTYPE html>
+<!--
+  文件名: guess.html
+  作用: 猜拳页面 — 玩家选择石头/剪刀/布，AJAX 提交并轮询等待所有玩家完成猜拳
+  路由: GET /game/{roomId}/{playerId}?phase=GUESS  (由 GameController.game() 根据游戏阶段返回)
+  页面功能:
+    1. 实时展示所有玩家状态卡片（昵称、HP、装备、位置、步数、血祭buff）
+    2. 猜拳按钮区（石头✊、剪刀✌️、布✋），通过 AJAX POST 提交手势
+    3. 已出拳后自动切换到等待状态，显示未出拳玩家列表
+    4. 每2秒 AJAX 轮询房间状态（/api/room/{roomId}?playerId={playerId}）
+    5. 操作记录实时更新（自动滚动到底部）
+    6. 聊天功能（发送消息 + 实时显示）
+    7. 游戏结束/玩家死亡时自动跳转
+    8. 所有玩家出拳完毕 → phase 变为 ACTION → 自动跳转到行动页面
+    9. 规则弹窗状态通过 sessionStorage 保持（页面刷新不丢失）
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <title>马刀游戏 - 猜拳</title>
     <style>
+        /* ========== 页面基础布局 ========== */
+        /*
+         * body:
+         *   font-family: Arial, sans-serif — 字体族
+         *   margin: 20px — 页面四周留白20px
+         */
         body { font-family: Arial, sans-serif; margin: 20px; }
+
+        /* ========== 玩家状态面板 ========== */
+        /*
+         * .status-box:
+         *   border: 1px solid #ccc — 1px灰色实线边框
+         *   margin-bottom: 20px — 底部间距20px
+         *   background: #f9f9f9 — 浅灰背景
+         */
         .status-box { border: 1px solid #ccc; margin-bottom: 20px; background: #f9f9f9; }
+        /*
+         * .status-box h4:
+         *   margin: 0 — 去除默认margin
+         *   padding: 10px — 内边距10px
+         *   background: #eee — 灰色标题栏背景
+         *   border-bottom: 1px solid #ddd — 底部1px分割线
+         */
         .status-box h4 { margin: 0; padding: 10px; background: #eee; border-bottom: 1px solid #ddd; }
+        /*
+         * .players-container:
+         *   display: flex — 弹性布局，卡片自动换行排列
+         *   flex-wrap: wrap — 超出宽度时换行
+         *   gap: 10px — 卡片之间的间距10px
+         *   padding: 10px — 内边距10px
+         */
         .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }
+        /*
+         * .player-card: 玩家卡片（current=当前玩家高亮, dead=死亡玩家灰色）
+         *   border: 1px solid #ddd — 1px灰色边框
+         *   padding: 8px 12px — 上下8px、左右12px的内边距
+         *   background: white — 白色背景
+         *   min-width: 130px — 最小宽度130px，保证卡片统一宽度
+         */
         .player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; }
+        /*
+         * .player-card.current:
+         *   border-color: #3498db — 蓝色边框（标识当前玩家）
+         *   background: #eaf4ff — 浅蓝背景（标识当前玩家）
+         */
         .player-card.current { border-color: #3498db; background: #eaf4ff; }
+        /*
+         * .player-card.dead:
+         *   background: #d3d3d3 — 灰色背景（死亡玩家）
+         *   color: #888 — 灰色文字
+         *   border-color: #aaa — 灰色边框
+         */
         .player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; }
+        /*
+         * .player-card p:
+         *   margin: 3px 0 — 上下3px、左右0的段落间距（紧凑排列）
+         */
         .player-card p { margin: 3px 0; }
+        /*
+         * .blood-buff:
+         *   color: red — 红色文字
+         *   font-weight: bold — 粗体（突出显示血祭状态）
+         */
         .blood-buff { color: red; font-weight: bold; }
+
+        /* ========== 猜拳按钮区 ========== */
+        /*
+         * .gesture-form:
+         *   margin: 20px 0 — 上下20px、左右0的间距
+         */
         .gesture-form { margin: 20px 0; }
+        /*
+         * .gesture-form button:
+         *   font-size: 20px — 字体大小20px（大号按钮）
+         *   padding: 10px 20px — 上下10px、左右20px的内边距
+         *   margin-right: 10px — 按钮之间的右侧间距10px
+         *   cursor: pointer — 鼠标手型
+         */
         .gesture-form button { font-size: 20px; padding: 10px 20px; margin-right: 10px; cursor: pointer; }
+
+        /* ========== 操作记录 ========== */
+        /*
+         * .log-box:
+         *   border: 1px solid #ccc — 1px灰色边框
+         *   margin-top: 30px — 顶部间距30px（与上方内容明显分隔）
+         *   background: #f9f9f9 — 浅灰背景
+         */
         .log-box { border: 1px solid #ccc; margin-top: 30px; background: #f9f9f9; }
+        /*
+         * .log-box h4:
+         *   margin: 0 — 去除默认margin
+         *   padding: 10px — 内边距10px
+         *   background: #eee — 灰色标题栏
+         *   position: sticky — 粘性定位
+         *   top: 0 — 滚动时吸附在容器顶部
+         *   z-index: 1 — 层级1，确保标题栏在滚动内容之上
+         *   border-bottom: 1px solid #ddd — 底部分割线
+         */
         .log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+        /*
+         * .log-scroll:
+         *   max-height: 200px — 最大高度200px
+         *   overflow-y: auto — 内容超出时显示垂直滚动条
+         */
         .log-scroll { max-height: 200px; overflow-y: auto; }
+        /*
+         * .log-scroll ul:
+         *   margin: 0 — 去除默认margin
+         *   padding: 10px 20px — 上下10px、左右20px的内边距
+         *   list-style-position: inside — 列表标记在内容内部
+         */
         .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
+        /*
+         * .log-scroll li:
+         *   margin: 3px 0 — 上下3px、左右0的间距
+         */
         .log-scroll li { margin: 3px 0; }
+
+        /* ========== 聊天区域 ========== */
+        /*
+         * .chat-box:
+         *   border: 1px solid #ccc — 1px灰色边框
+         *   margin-top: 20px — 顶部间距20px
+         *   background: #f9f9f9 — 浅灰背景
+         */
         .chat-box { border: 1px solid #ccc; margin-top: 20px; background: #f9f9f9; }
+        /*
+         * .chat-box h4:
+         *   margin: 0 — 去除默认margin
+         *   padding: 10px — 内边距10px
+         *   background: #eee — 灰色标题栏
+         *   position: sticky — 粘性定位
+         *   top: 0 — 滚动时吸附在容器顶部
+         *   z-index: 1 — 层级1
+         *   border-bottom: 1px solid #ddd — 底部分割线
+         */
         .chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
+        /*
+         * .chat-scroll:
+         *   max-height: 150px — 最大高度150px（比操作记录区小）
+         *   overflow-y: auto — 内容超出时滚动
+         */
         .chat-scroll { max-height: 150px; overflow-y: auto; }
+        /*
+         * .chat-scroll ul:
+         *   margin: 0 — 去除默认margin
+         *   padding: 10px 20px — 上下10px、左右20px
+         *   list-style-position: inside — 列表标记在内部
+         */
         .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
+        /*
+         * .chat-scroll li:
+         *   margin: 3px 0 — 上下3px、左右0
+         */
         .chat-scroll li { margin: 3px 0; }
+        /*
+         * .chat-form:
+         *   padding: 10px — 内边距10px
+         *   display: flex — 弹性布局，输入框和按钮同行
+         *   gap: 5px — 子元素间距5px
+         */
         .chat-form { padding: 10px; display: flex; gap: 5px; }
+
+        /*
+         * #waitMessage: 等待消息区默认隐藏，已出拳后由 JS 显示
+         *   display: none — 默认隐藏
+         */
         #waitMessage { display: none; }
 
-        /* 规则按钮（点击弹出，不受刷新影响） */
+        /* ========== 规则弹窗样式 ========== */
+        /*
+         * .rules-container:
+         *   position: fixed — 固定定位
+         *   top: 15px — 距顶部15px
+         *   right: 20px — 距右侧20px
+         *   z-index: 1000 — 层级1000
+         */
         .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+        /*
+         * .rules-btn:
+         *   padding: 8px 16px — 上下8px、左右16px
+         *   background: #3498db — 蓝色背景
+         *   color: white — 白色文字
+         *   border: none — 无边框
+         *   border-radius: 6px — 圆角6px
+         *   cursor: pointer — 鼠标手型
+         *   font-size: 14px — 字体大小14px
+         */
         .rules-btn {
             padding: 8px 16px; background: #3498db; color: white; border: none;
             border-radius: 6px; cursor: pointer; font-size: 14px;
         }
+        /*
+         * .rules-popup:
+         *   display: none — 默认隐藏
+         *   position: absolute — 绝对定位
+         *   right: 0 — 右对齐
+         *   top: 100% — 位于按钮下方
+         *   margin-top: 5px — 与按钮间距5px
+         *   width: max-content — 宽度自适应
+         *   max-width: 90vw — 最大宽度90%视口
+         *   max-height: 24em — 最大高度24行
+         *   overflow-y: auto — 超出滚动
+         *   background: #fff — 白色背景
+         *   border: 2px solid #3498db — 2px蓝色边框
+         *   border-radius: 8px — 圆角8px
+         *   box-shadow: 0 4px 12px rgba(0,0,0,0.3) — 阴影偏移(0,4px)、模糊12px、30%透明度
+         *   padding: 15px — 内边距15px
+         *   font-size: 13px — 字体大小13px
+         *   line-height: 1.6 — 行高1.6倍
+         *   color: #333 — 深灰色
+         *   text-align: left — 左对齐
+         *   white-space: normal — 允许换行
+         *   word-wrap: break-word — 长单词断行
+         */
         .rules-popup {
             display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
             width: max-content; max-width: 90vw;
@@ -44,13 +244,26 @@
             text-align: left;
             white-space: normal; word-wrap: break-word;
         }
+        /* .rules-popup.show: 显示弹窗 */
         .rules-popup.show { display: block; }
+        /*
+         * .rules-title:
+         *   text-align: center — 居中
+         *   font-weight: bold — 粗体
+         *   margin-bottom: 10px — 底部间距10px
+         *   font-size: 14px — 字体大小14px
+         */
         .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+        /*
+         * .rules-popup p:
+         *   margin: 4px 0 — 上下4px、左右0的段落间距
+         */
         .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!-- ========== 规则弹窗（通过 sessionStorage 保持状态，AJAX 刷新不丢失） ========== -->
 <div class="rules-container">
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
     <div class="rules-popup" id="rulesPopup">
@@ -70,7 +283,8 @@
     </div>
 </div>
 
-<!-- 玩家状态区 -->
+<!-- ========== 玩家状态区 ========== -->
+<!-- 通过 JS updatePlayers() 动态渲染所有玩家卡片 -->
 <div class="status-box">
     <h4>📋 玩家状态</h4>
     <div class="players-container" id="playersContainer">
@@ -78,23 +292,33 @@
     </div>
 </div>
 
-<!-- 猜拳区 -->
+<!-- ========== 猜拳操作区 ========== -->
+<!-- 初始显示，已出拳后隐藏 -->
 <div id="guessArea">
     <h2>请出拳：</h2>
     <div class="gesture-form">
+        <!--
+          三个猜拳按钮，通过 data-gesture 属性标记手势类型
+          JS 通过 getAttribute('data-gesture') 读取，提交到 /api/guess/{roomId}/{playerId}
+          手势对应:
+            - data-gesture="石头": 赢剪刀，输布
+            - data-gesture="剪刀": 赢布，输石头
+            - data-gesture="布": 赢石头，输剪刀
+        -->
         <button data-gesture="石头">✊ 石头</button>
         <button data-gesture="剪刀">✌️ 剪刀</button>
         <button data-gesture="布">✋ 布</button>
     </div>
 </div>
 
-<!-- 等待区 -->
+<!-- ========== 等待区 ========== -->
+<!-- 默认隐藏，玩家已出拳后显示，每2秒轮询更新未出拳玩家列表 -->
 <div id="waitMessage">
     <h2>等待其他玩家猜拳...</h2>
     <div id="waitDetail"></div>
 </div>
 
-<!-- 操作记录 -->
+<!-- ========== 操作记录 ========== -->
 <div class="log-box">
     <h4>📜 操作记录</h4>
     <div class="log-scroll" id="logScroll">
@@ -102,35 +326,67 @@
     </div>
 </div>
 
-<!-- 聊天框 -->
+<!-- ========== 聊天区域 ========== -->
 <div class="chat-box">
     <h4>💬 聊天</h4>
     <div class="chat-scroll" id="chatScroll">
         <ul id="chatList"></ul>
     </div>
+    <!--
+      聊天表单
+      参数:
+        - chatInput: 文本输入框，autocomplete="off" 防止浏览器自动填充
+        - 提交事件: 通过 addEventListener('submit') 拦截，AJAX POST 发送
+      对应后端: POST /api/chat/{roomId}/{playerId}
+    -->
     <form id="chatForm" class="chat-form">
         <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
         <button type="submit">发送</button>
     </form>
 </div>
 
+<!-- ========== 核心交互脚本 ========== -->
 <script th:inline="javascript">
+    /*
+     * Thymeleaf 内联注入变量:
+     *   - roomId: String 类型，当前房间ID，来自 Controller Model
+     *   - playerId: String 类型，当前玩家ID，来自 Controller Model
+     */
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
 
-    // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
+    // ===== 规则弹窗控制（状态存储到 sessionStorage，跨 AJAX 刷新保持） =====
+    // RULES_KEY: sessionStorage 的键名，附加 roomId 避免不同房间冲突
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
+
+    /**
+     * 切换规则弹窗显示/隐藏
+     * 无参数
+     * 同时将状态写入 sessionStorage，确保 AJAX 轮询刷新 DOM 后弹窗状态不丢失
+     */
     function toggleRules() {
         var popup = document.getElementById('rulesPopup');
         popup.classList.toggle('show');
+        // 将当前显示状态写入 sessionStorage
         sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
     }
+
+    /**
+     * 从 sessionStorage 恢复规则弹窗的显示状态
+     * 无参数
+     * 在每次 AJAX 刷新后调用，确保弹窗状态不被重置
+     */
     function restoreRulesPopup() {
         var popup = document.getElementById('rulesPopup');
         if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
             popup.classList.add('show');
         }
     }
+
+    /**
+     * 点击弹窗外部关闭
+     * @param {MouseEvent} e - 点击事件对象
+     */
     window.addEventListener('click', function(e) {
         var container = document.querySelector('.rules-container');
         if (!container.contains(e.target)) {
@@ -140,45 +396,67 @@
         }
     });
 
-    // ========== AJAX 状态刷新 ==========
+    // ===== AJAX 状态刷新（核心轮询函数） =====
+    /**
+     * 从服务端获取最新游戏状态并更新UI
+     * 请求地址: GET /api/room/{roomId}?playerId={playerId}
+     * 返回数据结构:
+     *   - data.status: String 类型，房间状态 "WAITING" | "GUESS" | "ACTION" | "FINISHED"
+     *   - data.phase: String 类型，当前阶段 "GUESS" | "ACTION"
+     *   - data.players: Array<PlayerDTO> 类型，所有玩家信息
+     *     PlayerDTO: { id, name, hp, horse, knife, steps, location, buff, ... }
+     *   - data.currentPlayerGuess: String|null 类型，当前玩家已出的手势（null=未出拳）
+     *   - data.currentPlayerAlive: boolean 类型，当前玩家是否存活
+     *   - data.playersNotGuessed: Array<String> 类型，尚未出拳的玩家名称列表
+     *   - data.actionLogs: Array<String> 类型，操作记录
+     *   - data.chatMessages: Array<String> 类型，聊天消息
+     * 调用频率: 每2秒由 setInterval 触发
+     */
     async function fetchState() {
         try {
+            // url: 拼接请求地址，playerId 作为查询参数
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
+            // res: fetch 返回的 Response 对象
             var res = await fetch(url);
             if (!res.ok) return;
+            // data: 解析后的 JSON 响应体
             var data = await res.json();
+            // 房间不存在时跳转首页
             if (!data.status) {
                 window.location.href = '/';
                 return;
             }
 
-            updatePlayers(data.players);
-            updateLogs(data.actionLogs);
-            updateChat(data.chatMessages);
+            // 更新三个UI区域
+            updatePlayers(data.players);     // 玩家卡片
+            updateLogs(data.actionLogs);     // 操作记录
+            updateChat(data.chatMessages);   // 聊天消息
 
-            // 游戏结束
+            // 游戏结束 → 跳转到结果页
             if (data.status === 'FINISHED') {
                 window.location.href = '/game/' + roomId + '/' + playerId;
                 return;
             }
-            // 玩家死亡
+            // 玩家死亡 → 跳转到结果/观战页
             if (!data.currentPlayerAlive) {
                 window.location.href = '/game/' + roomId + '/' + playerId;
                 return;
             }
 
-            // 根据阶段切换显示
+            // 根据阶段切换猜拳/等待显示
             if (data.phase === 'GUESS') {
                 if (data.currentPlayerGuess == null) {
-                    // 还没出拳，显示猜拳按钮
+                    // 还没出拳 → 显示猜拳按钮，隐藏等待区
                     document.getElementById('guessArea').style.display = 'block';
                     document.getElementById('waitMessage').style.display = 'none';
                 } else {
-                    // 已出拳，等待他人
+                    // 已出拳 → 隐藏猜拳按钮，显示等待区（列出未出拳玩家）
                     document.getElementById('guessArea').style.display = 'none';
                     document.getElementById('waitMessage').style.display = 'block';
+                    // detailDiv: 等待详情容器
                     var detailDiv = document.getElementById('waitDetail');
                     if (data.playersNotGuessed && data.playersNotGuessed.length > 0) {
+                        // items: 未出拳玩家名称的 <li> 列表
                         var items = data.playersNotGuessed.map(function(n) { return '<li>' + n + '</li>'; }).join('');
                         detailDiv.innerHTML = '<p>等待以下玩家出拳：</p><ul>' + items + '</ul>';
                     } else {
@@ -186,27 +464,39 @@
                     }
                 }
             } else if (data.phase === 'ACTION') {
-                // 自动跳转到行动页
+                // 阶段变为行动 → 自动跳转（由 Controller 决定渲染 action.html 或本页）
                 window.location.href = '/game/' + roomId + '/' + playerId;
             }
 
-            // ★ 恢复规则弹窗状态
+            // 恢复规则弹窗状态（每次刷新后重新设置）
             restoreRulesPopup();
         } catch (e) {
+            // e: 网络异常时的 Error 对象
             console.error('状态刷新失败', e);
         }
     }
 
-    // ========== 猜拳提交 ==========
+    // ===== 猜拳提交 =====
+    /**
+     * 为三个猜拳按钮绑定点击事件
+     * @param {HTMLElement} btn - 猜拳按钮元素
+     *   btn.getAttribute('data-gesture'): String 类型，手势值 "石头"|"剪刀"|"布"
+     * 请求: POST /api/guess/{roomId}/{playerId}
+     *   请求体: FormData { gesture: String }
+     * 对应后端: GameController.submitGuess() → GameService.processGuess()
+     * 提交后立即调用 fetchState() 刷新界面，切换为等待状态
+     */
     var gestureButtons = document.querySelectorAll('.gesture-form button');
     gestureButtons.forEach(function(btn) {
         btn.addEventListener('click', async function() {
+            // gesture: String 类型，从按钮的 data-gesture 属性获取手势值
             var gesture = this.getAttribute('data-gesture');
+            // formData: 封装手势数据的 FormData 对象
             var formData = new FormData();
             formData.append('gesture', gesture);
             try {
                 await fetch('/api/guess/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-                // 立即刷新状态，界面将变为等待状态
+                // 提交成功后立即刷新状态，界面将切换为等待状态
                 fetchState();
             } catch (e) {
                 console.error('猜拳提交失败', e);
@@ -214,14 +504,35 @@
         });
     });
 
-    // ========== UI 更新函数 ==========
+    // ===== UI 更新函数 =====
+    /**
+     * 更新玩家状态卡片列表
+     * @param {Array<Object>} players - 玩家信息数组，每个元素包含:
+     *   p.id: String 类型，玩家ID
+     *   p.name: String 类型，玩家昵称
+     *   p.hp: int 类型，当前生命值（<=0 表示死亡）
+     *   p.horse: boolean 类型，是否有马
+     *   p.knife: boolean 类型，是否有刀
+     *   p.location: String 类型，当前位置（如"城内1"、"城外"）
+     *   p.steps: int 类型，当前步数（>0 时显示）
+     *   p.buff: boolean 类型，是否有血祭buff（>0 时显示"🔥 血祭"）
+     * 渲染逻辑:
+     *   - p.id === playerId → 添加 .current 类（蓝色边框高亮）
+     *   - p.hp <= 0 → 添加 .dead 类（灰色表示死亡）
+     */
     function updatePlayers(players) {
+        // container: 玩家卡片容器 DOM 元素
         var container = document.getElementById('playersContainer');
+        // html: 累积的 HTML 字符串
         var html = '';
         for (var i = 0; i < players.length; i++) {
+            // p: 当前遍历的玩家对象
             var p = players[i];
+            // isMe: boolean 类型，标记是否为当前玩家
             var isMe = p.id === playerId;
+            // deadClass: 死亡玩家添加 ' dead' CSS 类
             var deadClass = p.hp <= 0 ? ' dead' : '';
+            // currentClass: 当前玩家添加 ' current' CSS 类
             var currentClass = isMe ? ' current' : '';
             html += '<div class="player-card' + currentClass + deadClass + '">';
             html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
@@ -236,24 +547,41 @@
         container.innerHTML = html;
     }
 
+    /**
+     * 更新操作记录列表
+     * @param {Array<String>} logs - 操作记录字符串数组
+     * 优化: 仅在列表长度变化时重新渲染，避免不必要的 DOM 操作
+     * 渲染后自动滚动到底部
+     */
     function updateLogs(logs) {
+        // logList: 操作记录 <ul> 元素
         var logList = document.getElementById('logList');
+        // 仅当记录数量变化时才重新渲染
         if (logList.children.length !== logs.length) {
             var html = '';
             for (var i = 0; i < logs.length; i++) {
                 html += '<li>' + logs[i] + '</li>';
             }
             logList.innerHTML = html;
-            // 自动滚动到底部
+            // logScroll: 滚动容器，渲染后自动滚到底部
             var logScroll = document.getElementById('logScroll');
             logScroll.scrollTop = logScroll.scrollHeight;
         }
     }
 
+    /**
+     * 更新聊天消息列表
+     * @param {Array<String>} messages - 聊天消息字符串数组
+     * 优化: 先比较数量和内容，仅在变化时重新渲染，减少闪烁
+     * 渲染后自动滚动到底部
+     */
     function updateChat(messages) {
+        // chatList: 聊天消息 <ul> 元素
         var chatList = document.getElementById('chatList');
+        // needUpdate: 判断是否需要更新 DOM
         var needUpdate = chatList.children.length !== messages.length;
         if (!needUpdate) {
+            // 数量相同，逐条比较文本内容
             for (var i = 0; i < messages.length; i++) {
                 if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
             }
@@ -264,35 +592,48 @@
                 html += '<li>' + messages[i] + '</li>';
             }
             chatList.innerHTML = html;
-            // 自动滚动到底部
+            // chatScroll: 滚动容器，渲染后自动滚到底部
             var chatScroll = document.getElementById('chatScroll');
             chatScroll.scrollTop = chatScroll.scrollHeight;
         }
     }
 
-    // ========== 聊天发送 ==========
+    // ===== 聊天发送 =====
+    /**
+     * 聊天表单提交事件处理
+     * @param {Event} e - 表单提交事件对象
+     * 请求: POST /api/chat/{roomId}/{playerId}
+     *   请求体: FormData { message: String }
+     * 对应后端: GameController.sendChat()
+     * 发送后: 清空输入框，重新获取消息列表并刷新
+     */
     document.getElementById('chatForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
+        e.preventDefault(); // 阻止表单默认提交行为
+        // input: 聊天输入框 DOM 元素
         var input = document.getElementById('chatInput');
+        // message: String 类型，去首尾空格后的消息内容
         var message = input.value.trim();
-        if (!message) return;
+        if (!message) return; // 空消息不发送
+        // formData: 封装消息的 FormData 对象
         var formData = new FormData();
         formData.append('message', message);
         try {
             await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';
+            input.value = ''; // 清空输入框
+            // 重新获取房间状态以刷新聊天列表
             var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
             var data = await res.json();
             updateChat(data.chatMessages);
         } catch (err) {
+            // err: 网络异常时的 Error 对象
             console.error(err);
         }
     });
 
-    // ========== 定时刷新 ==========
-    restoreRulesPopup();
-    fetchState();
-    setInterval(fetchState, 2000);
+    // ===== 定时刷新 =====
+    restoreRulesPopup();          // 页面加载时恢复弹窗状态
+    fetchState();                 // 立即执行一次状态刷新
+    setInterval(fetchState, 2000); // 每2秒轮询一次
 </script>
 </body>
 </html>
