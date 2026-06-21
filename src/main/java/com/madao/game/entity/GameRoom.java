@@ -1,5 +1,8 @@
 package com.madao.game.entity;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -29,6 +32,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class GameRoom {
 
+    private static final Logger log = LoggerFactory.getLogger(GameRoom.class);
+
     /** 房间唯一标识（UUID），数据库主键 */
     private String id;
 
@@ -56,11 +61,11 @@ public class GameRoom {
     /** 行动队列当前指针：指向正在行动的玩家在 actionQueue 中的索引 */
     private int currentActionIndex = 0;
 
-    /** 行动日志列表，最多保留30条，记录每回合所有玩家操作 */
-    private List<String> actionLogs = new ArrayList<>();
+    /** 行动日志列表，最多保留30条，记录每回合所有玩家操作（CopyOnWriteArrayList 保证并发读安全） */
+    private List<String> actionLogs = new CopyOnWriteArrayList<>();
 
-    /** 聊天消息列表，最多保留50条 */
-    private List<String> chatMessages = new ArrayList<>();
+    /** 聊天消息列表，最多保留50条（CopyOnWriteArrayList 保证并发读安全） */
+    private List<String> chatMessages = new CopyOnWriteArrayList<>();
 
     // ==================================================================================
     //  日志管理
@@ -76,6 +81,7 @@ public class GameRoom {
      */
     public void addLog(String log) {
         System.out.println(log);           // 同步输出到控制台，方便调试
+        GameRoom.log.info(log);            // SLF4J 结构化日志
         actionLogs.add(log);
         if (actionLogs.size() > 30) actionLogs.remove(0); // 只保留最近30条
     }
@@ -206,7 +212,11 @@ public class GameRoom {
     public void setWinner(String winner) { this.winner = winner; }
 
     public List<Player> getPlayers() { return players; }
-    public void setPlayers(List<Player> players) { this.players = players; }
+    /** 设置玩家列表时自动包装为 CopyOnWriteArrayList，确保线程安全 */
+    public void setPlayers(List<Player> players) {
+        this.players = players instanceof CopyOnWriteArrayList
+                ? players : new CopyOnWriteArrayList<>(players);
+    }
 
     public List<String> getActionQueue() { return actionQueue; }
     public void setActionQueue(List<String> actionQueue) { this.actionQueue = actionQueue; }

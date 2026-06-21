@@ -11,6 +11,8 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -72,6 +74,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class GameService {
+
+    private static final Logger log = LoggerFactory.getLogger(GameService.class);
 
     /** 内存房间缓存，key=房间UUID，使用 ConcurrentHashMap 保证并发读安全 */
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
@@ -868,8 +872,10 @@ public class GameService {
         String ip = getClientIp();
         if (ip != null) {
             System.out.println("[IP: " + ip + "] " + msg);
+            log.info("[IP: {}] {}", ip, msg);
         } else {
             System.out.println("[无] " + msg);
+            log.info("[无] {}", msg);
         }
     }
 

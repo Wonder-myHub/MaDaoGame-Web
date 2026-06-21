@@ -62,7 +62,8 @@ public class Player {
     public void setName(String name) { this.name = name; }
 
     public int getHp() { return hp; }
-    public void setHp(int hp) { this.hp = hp; }
+    /** 设置HP时自动钳制到不小于0，避免出现负数生命值 */
+    public void setHp(int hp) { this.hp = Math.max(hp, 0); }
 
     public int getSteps() { return steps; }
     public void setSteps(int steps) { this.steps = steps; }

@@ -42,11 +42,13 @@ function rulesKey() {
 /**
  * 切换规则弹窗的显示/隐藏状态
  * 使用 sessionStorage 持久化状态，页面刷新后不丢失
+ * 已添加 null 检查，防止 popup 元素不存在时抛出错误
  */
 function toggleRules() {
     var popup = document.getElementById('rulesPopup');
+    if (!popup) return;
     popup.classList.toggle('show');
-    sessionStorage.setItem(rulesKey(), popup.classList.contains('show'));
+    sessionStorage.setItem(rulesKey(), String(popup.classList.contains('show')));
 }
 
 /**
@@ -60,13 +62,15 @@ function restoreRulesPopup() {
     }
 }
 
-// 全局点击监听：点击弹窗外部区域时自动关闭弹窗
+// 全局点击监听：点击弹窗外部区域时自动关闭弹窗（已添加 null 检查）
 window.addEventListener('click', function(e) {
     var container = document.querySelector('.rules-container');
+    if (!container) return;
+    var popup = document.getElementById('rulesPopup');
+    if (!popup) return;
     if (!container.contains(e.target)) {
-        var popup = document.getElementById('rulesPopup');
         popup.classList.remove('show');
-        sessionStorage.setItem(rulesKey(), false);
+        sessionStorage.setItem(rulesKey(), 'false');
     }
 });
 
@@ -104,7 +108,7 @@ function updatePlayers(players) {
 
 /**
  * 更新操作记录列表
- * 优化：仅在列表长度变化时重新渲染，避免不必要的 DOM 操作
+ * 优化：先比较数量和内容，仅在变化时重新渲染，减少闪烁
  *
  * @param {Array<string>} logs - 操作记录字符串数组
  */
@@ -112,7 +116,16 @@ function updateLogs(logs) {
     if (!logs) return;
     var logList = document.getElementById('logList');
     if (!logList) return;
-    if (logList.children.length !== logs.length) {
+    // 先比较数量，再逐条比较内容（和 updateChat 保持一致）
+    var needUpdate = logList.children.length !== logs.length;
+    if (!needUpdate) {
+        for (var i = 0; i < logs.length; i++) {
+            if (logList.children[i] && logList.children[i].textContent !== logs[i]) {
+                needUpdate = true; break;
+            }
+        }
+    }
+    if (needUpdate) {
         var html = '';
         for (var i = 0; i < logs.length; i++) {
             html += '<li>' + escapeHtml(logs[i]) + '</li>';

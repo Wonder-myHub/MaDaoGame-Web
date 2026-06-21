@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="/css/common.css">
     <script src="/js/common.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        body { background: #f5f5f5; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         h1 { text-align: center; }
         .room-id { font-size: 18px; margin-bottom: 15px; display: flex; align-items: center; background: #eef; padding: 10px; border-radius: 5px; }
@@ -39,25 +39,8 @@
 </head>
 <body>
 
-<!-- ========== 规则弹窗 ========== -->
-<div class="rules-container">
-    <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
-    <div class="rules-popup" id="rulesPopup">
-        <div class="rules-title">马刀游戏规则</div>
-        <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
-        <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
-        <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
-        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
-        <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
-        <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
-        <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
-        <p>马：只能在城内使用，当有其它玩家与你在同一个城内时，可以消耗一次步数，将他踢到城外（踢出去）</p>
-        <p>同时他会减少3点生命值。</p>
-        <p>刀：可以在城内或城外使用，当有其它玩家与你在同一个区域时，可以消耗一次步数，刺他一刀，他会减少1点生命值。</p>
-        <p>血祭：消耗一次步数，生命值减至一半，向上取整（1点生命值时无法血祭），下一次的攻击翻2倍（可跨回合）不可叠加。</p>
-        <p>撵进去：当你与其它玩家在城外时，可以消耗一次步数，将其中一个玩家撵入一个城内。</p>
-    </div>
-</div>
+<!-- ========== 规则弹窗（引用公共 Thymeleaf 片段） ========== -->
+<div th:replace="fragments/rules :: rulesPopup"></div>
 
 <!-- ========== 主内容区 ========== -->
 <div class="container">
@@ -114,10 +97,22 @@
         });
     });
 
-    // ===== 房主强制开始 =====
+    // ===== 房主强制开始（增加前端状态检查，避免无效请求） =====
     async function forceStart() {
         var errorDiv = document.getElementById('startError');
         errorDiv.textContent = '';
+        // 前端检查：游戏已经开始则直接跳转
+        var statusText = document.getElementById('statusText').textContent;
+        if (statusText === 'PLAYING') {
+            window.location.href = '/game/' + roomId + '/' + playerId;
+            return;
+        }
+        // 前端检查：至少需要2人
+        var countText = document.getElementById('playerCountText').textContent;
+        if (parseInt(countText) < 2) {
+            errorDiv.textContent = '当前人数不足，至少需要2人';
+            return;
+        }
         try {
             var response = await fetch('/lobby/' + roomId + '/' + playerId + '/start', { method: 'POST' });
             var data = await response.json();
