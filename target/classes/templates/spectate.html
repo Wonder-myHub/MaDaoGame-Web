@@ -1,8 +1,54 @@
 <!DOCTYPE html>
+<!--
+  ================================================================================
+  文件: spectate.html - 马刀游戏 · 观战页面
+  ================================================================================
+
+  【路由信息】
+  请求路径: GET /game/{roomId}/{playerId}
+  对应Controller: GameController.gamePage()
+  分发条件: 当玩家已死亡（player.hp <= 0 或 player.alive == false）
+  -> 死亡玩家无法参与游戏，只能观看其他玩家对战
+
+  【页面功能】
+  1. 只读展示所有玩家状态（HP、位置、装备、步数、血祭buff）
+  2. 实时显示操作记录（actionLogs）
+  3. 支持观看聊天消息并发送消息（死亡玩家仍可聊天）
+  4. 游戏结束时自动跳转到结果页
+  5. 支持"退出观战"离开房间
+  6. 规则弹窗查看游戏规则
+
+  【后端注入变量（Thymeleaf Model 属性）】
+  ${roomId}  : String - 当前房间ID（UUID），来源: GameController model.addAttribute("roomId", roomId)
+  ${playerId} : String - 当前玩家ID（UUID），来源: GameController model.addAttribute("playerId", playerId)
+
+  【前端行为总览】
+  - 页面加载时调用 fetchState() 获取游戏状态
+  - setInterval(fetchState, 2000) 每2秒轮询一次
+  - 仅更新展示数据（players/actionLogs/chatMessages），不参与游戏操作
+  - 游戏结束 (status=='FINISHED') 时自动跳转到结果页 /game/{roomId}/{playerId}
+  - 房间不存在时跳转到首页 /
+  - 使用 sessionStorage 保存规则弹窗展开/收起状态
+
+  【与 action.html 的关键区别】
+  - 没有行动操作区域（#actionArea/#waitMessage）
+  - 没有行动按钮、目标选择、城市选择等交互元素
+  - 没有 pendingAction 状态管理
+  - 顶部有"退出观战"按钮（离开房间）
+  - 提示文字："你已出局，现在正在观看其他玩家对战"
+  - 使用暗色主题（深蓝渐变背景 + 金色边框）
+
+  ================================================================================
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
+    <!--
+      charset: UTF-8 统一字符编码，确保中文/emoji 正常显示
+    -->
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>马刀游戏 - 观战</title>
+    <link rel="stylesheet" href="/css/common.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -10,123 +56,53 @@
             background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
             color: white;
         }
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .exit-btn {
-            padding: 8px 16px;
-            background: #e74c3c;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 14px;
-        }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .exit-btn { padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; text-decoration: none; font-size: 14px; }
         .exit-btn:hover { background: #c0392b; }
-        .status-box {
-            border: 1px solid #ffd700;
-            margin-bottom: 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-        }
-        .status-box h4 {
-            margin: 0;
-            padding: 10px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #ffd700;
-            color: #ffd700;
-            border-radius: 10px 10px 0 0;
-        }
-        .players-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            padding: 15px;
-        }
-        .player-card {
-            border: 1px solid rgba(255,255,255,0.3);
-            padding: 10px 15px;
-            background: rgba(255,255,255,0.05);
-            min-width: 130px;
-            border-radius: 8px;
-            color: white;
-        }
-        .player-card.current {
-            border-color: #ffd700;
-            background: rgba(255,215,0,0.2);
-        }
-        .player-card.dead {
-            background: rgba(100,100,100,0.3);
-            color: #aaa;
-            border-color: #666;
-        }
+        .status-box { border: 1px solid #ffd700; margin-bottom: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .status-box h4 { margin: 0; padding: 10px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; border-radius: 10px 10px 0 0; }
+        .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 15px; }
+        .player-card { border: 1px solid rgba(255,255,255,0.3); padding: 10px 15px; background: rgba(255,255,255,0.05); min-width: 130px; border-radius: 8px; color: white; }
+        .player-card.current { border-color: #ffd700; background: rgba(255,215,0,0.2); }
+        .player-card.dead { background: rgba(100,100,100,0.3); color: #aaa; border-color: #666; }
         .player-card p { margin: 4px 0; }
         .blood-buff { color: #ff4444; font-weight: bold; }
-        .log-box {
-            border: 1px solid #ffd700;
-            margin-top: 30px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-        }
-        .log-box h4 {
-            margin: 0;
-            padding: 10px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #ffd700;
-            color: #ffd700;
-            border-radius: 10px 10px 0 0;
-        }
+        .log-box { border: 1px solid #ffd700; margin-top: 30px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .log-box h4 { margin: 0; padding: 10px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; border-radius: 10px 10px 0 0; }
         .log-scroll { max-height: 200px; overflow-y: auto; }
         .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
         .log-scroll li { margin: 3px 0; }
-        .chat-box {
-            border: 1px solid #ffd700;
-            margin-top: 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-        }
-        .chat-box h4 {
-            margin: 0;
-            padding: 10px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #ffd700;
-            color: #ffd700;
-            border-radius: 10px 10px 0 0;
-        }
+        .chat-box { border: 1px solid #ffd700; margin-top: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .chat-box h4 { margin: 0; padding: 10px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; border-radius: 10px 10px 0 0; }
         .chat-scroll { max-height: 150px; overflow-y: auto; }
         .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
         .chat-scroll li { margin: 3px 0; }
         .chat-form { padding: 10px; display: flex; gap: 5px; }
-
-        /* 规则按钮 */
-        .rules-btn {
-            padding: 8px 16px; background: #3498db; color: white; border: none;
-            border-radius: 6px; cursor: pointer; font-size: 14px;
-        }
+        /* spectate 页面规则容器在 .top-bar 内，使用 relative 定位 */
         .rules-container { position: relative; }
-        .rules-popup {
-            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-            width: max-content; max-width: 90vw;
-            max-height: 24em; overflow-y: auto;
-            background: #222; border: 2px solid #ffd700;
-            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-            padding: 15px; font-size: 13px; line-height: 1.6; color: #eee;
-            text-align: left;
-            white-space: normal; word-wrap: break-word;
-            z-index: 1000;
-        }
-        .rules-popup.show { display: block; }
-        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; color: #ffd700; }
-        .rules-popup p { margin: 4px 0; }
     </style>
 </head>
-<body>
-<!-- 顶部导航栏 -->
+<body class="dark-theme">
+
+<!--
+  ==================== 顶部导航栏 ====================
+  布局: 左侧"退出观战"按钮 | 右侧"规则"按钮
+  使用 flexbox space-between 两端对齐
+-->
 <div class="top-bar">
+    <!--
+      "退出观战"链接 — 离开房间
+      th:href: Thymeleaf 链接表达式
+        @{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}
+        渲染后如: /leave/a1b2c3d4.../e5f6g7h8...
+      效果: 从房间中移除该玩家，跳转回首页 /
+    -->
     <a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" class="exit-btn">退出观战</a>
+
+    <!--
+      ===== 规则弹窗（暗色主题） =====
+      与 action.html 相同的规则弹窗，配色适配暗色背景
+    -->
     <div class="rules-container">
         <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
         <div class="rules-popup" id="rulesPopup">
@@ -147,9 +123,19 @@
     </div>
 </div>
 
+<!--
+  观战提示文字
+  color: #aaa — 浅灰色，低调提示
+  内容告知玩家已出局，正在观看其他玩家对战
+-->
 <p style="color: #aaa;">你已出局，现在正在观看其他玩家对战。页面自动刷新。</p>
 
-<!-- 玩家状态区 -->
+<!--
+  ==================== 玩家状态面板 ====================
+  由 updatePlayers(data.players) 动态渲染
+  data.players 来源: GET /api/room/{roomId}?playerId={playerId} 响应中的 players 数组
+  显示所有玩家的实时状态（含存活和死亡玩家）
+-->
 <div class="status-box">
     <h4>📋 玩家状态</h4>
     <div class="players-container" id="playersContainer">
@@ -157,7 +143,13 @@
     </div>
 </div>
 
-<!-- 操作记录 -->
+<!--
+  ==================== 操作记录面板 ====================
+  由 updateLogs(data.actionLogs) 动态渲染
+  data.actionLogs: List<String> — 行动日志（最多30条）
+  带粘性标题 + 滚动区，新消息自动滚到底部
+  深度比较机制：不仅比较数量，还逐条比较内容，确保内容变化时也能更新
+-->
 <div class="log-box">
     <h4>📜 操作记录</h4>
     <div class="log-scroll" id="logScroll">
@@ -165,160 +157,58 @@
     </div>
 </div>
 
-<!-- 聊天框 -->
+<!--
+  ==================== 聊天面板 ====================
+  由 updateChat(data.chatMessages) 动态渲染
+  data.chatMessages: List<String> — 聊天消息（最多50条）
+  死亡玩家仍可发送聊天消息（观战不剥夺聊天权）
+-->
 <div class="chat-box">
     <h4>💬 聊天</h4>
     <div class="chat-scroll" id="chatScroll">
         <ul id="chatList"></ul>
     </div>
+    <!--
+      id="chatForm" — 聊天表单
+      POST /api/chat/{roomId}/{playerId}，参数 message (FormData)
+    -->
     <form id="chatForm" class="chat-form">
         <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
         <button type="submit">发送</button>
     </form>
 </div>
 
+<!--
+  ===================================================================
+  页面交互脚本（Thymeleaf 内联模式）
+  th:inline="javascript" 启用 Thymeleaf JS 内联，支持 /*[[...]]*/ 语法
+  ===================================================================
+-->
+<script th:inline="javascript" src="/js/common.js"></script>
 <script th:inline="javascript">
+
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
-
-    // ========== 规则弹窗控制 ==========
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
-    function toggleRules() {
-        var popup = document.getElementById('rulesPopup');
-        popup.classList.toggle('show');
-        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
-    }
-    function restoreRulesPopup() {
-        var popup = document.getElementById('rulesPopup');
-        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
-            popup.classList.add('show');
-        }
-    }
-    window.addEventListener('click', function(e) {
-        var container = document.querySelector('.rules-container');
-        if (!container.contains(e.target)) {
-            var popup = document.getElementById('rulesPopup');
-            popup.classList.remove('show');
-            sessionStorage.setItem(RULES_KEY, false);
-        }
-    });
 
-    // ========== 主刷新函数 ==========
     async function fetchState() {
         try {
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
             var res = await fetch(url);
             if (!res.ok) return;
             var data = await res.json();
-            if (!data.status) {
-                window.location.href = '/';
-                return;
-            }
+            if (!data.status) { window.location.href = '/'; return; }
 
             updatePlayers(data.players);
             updateLogs(data.actionLogs);
             updateChat(data.chatMessages);
 
-            if (data.status === 'FINISHED') {
-                window.location.href = '/game/' + roomId + '/' + playerId;
-            }
-
+            if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; }
             restoreRulesPopup();
-        } catch (e) {
-            console.error('状态刷新失败', e);
-        }
+        } catch (e) { console.error('状态刷新失败', e); }
     }
 
-    // ========== UI 更新函数 ==========
-    function updatePlayers(players) {
-        if (!players) return;
-        var container = document.getElementById('playersContainer');
-        var html = '';
-        for (var i = 0; i < players.length; i++) {
-            var p = players[i];
-            var isMe = p.id === playerId;
-            var deadClass = p.hp <= 0 ? ' dead' : '';
-            var currentClass = isMe ? ' current' : '';
-            html += '<div class="player-card' + currentClass + deadClass + '">';
-            html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
-            html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
-            html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
-            html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';
-            html += '<p>📍 ' + p.location + '</p>';
-            if (p.steps > 0) html += '<p>👣 ' + p.steps + '</p>';
-            if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
-            html += '</div>';
-        }
-        container.innerHTML = html;
-    }
-
-    // 修复：深度比较日志内容，确保任何变化都能更新
-    function updateLogs(logs) {
-        if (!logs) return;
-        var logList = document.getElementById('logList');
-        var needUpdate = logList.children.length !== logs.length;
-        if (!needUpdate) {
-            for (var i = 0; i < logs.length; i++) {
-                if (logList.children[i].textContent !== logs[i]) {
-                    needUpdate = true;
-                    break;
-                }
-            }
-        }
-        if (needUpdate) {
-            var html = '';
-            for (var i = 0; i < logs.length; i++) {
-                html += '<li>' + logs[i] + '</li>';
-            }
-            logList.innerHTML = html;
-            var logScroll = document.getElementById('logScroll');
-            logScroll.scrollTop = logScroll.scrollHeight;
-        }
-    }
-
-    function updateChat(messages) {
-        if (!messages) return;
-        var chatList = document.getElementById('chatList');
-        var needUpdate = chatList.children.length !== messages.length;
-        if (!needUpdate) {
-            for (var i = 0; i < messages.length; i++) {
-                if (chatList.children[i].textContent !== messages[i]) {
-                    needUpdate = true;
-                    break;
-                }
-            }
-        }
-        if (needUpdate) {
-            var html = '';
-            for (var i = 0; i < messages.length; i++) {
-                html += '<li>' + messages[i] + '</li>';
-            }
-            chatList.innerHTML = html;
-            var chatScroll = document.getElementById('chatScroll');
-            chatScroll.scrollTop = chatScroll.scrollHeight;
-        }
-    }
-
-    // ========== 聊天发送 ==========
-    document.getElementById('chatForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        var input = document.getElementById('chatInput');
-        var message = input.value.trim();
-        if (!message) return;
-        var formData = new FormData();
-        formData.append('message', message);
-        try {
-            await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';
-            var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
-            var data = await res.json();
-            updateChat(data.chatMessages);
-        } catch (err) {
-            console.error(err);
-        }
-    });
-
-    // ========== 定时刷新 ==========
+    initChatForm();
     restoreRulesPopup();
     fetchState();
     setInterval(fetchState, 2000);

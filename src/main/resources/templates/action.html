@@ -45,276 +45,37 @@
       charset: UTF-8 统一字符编码，确保中文/emoji 正常显示
     -->
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>马刀游戏 - 行动</title>
+    <link rel="stylesheet" href="/css/common.css">
     <style>
-        /*
-         * body 全局样式
-         * font-family: Arial, sans-serif — 无衬线字体族，优先使用 Arial，不支持时回退到系统默认 sans-serif
-         * margin: 20px — 页面四周留白 20px，防止内容贴边
-         */
         body { font-family: Arial, sans-serif; margin: 20px; }
-
-        /*
-         * .status-box 玩家状态面板容器
-         * border: 1px solid #ccc — 1px 实线，颜色 #cccccc（浅灰边框）
-         * margin-bottom: 20px — 与下一个元素间距 20px
-         * background: #f9f9f9 — 浅灰背景，区别于白色内容区
-         */
         .status-box { border: 1px solid #ccc; margin-bottom: 20px; background: #f9f9f9; }
-
-        /*
-         * .status-box h4 面板标题
-         * margin: 0 — 取消 h4 默认外边距，使标题栏紧贴边框
-         * padding: 10px — 标题文字内边距
-         * background: #eee — 比容器稍深的灰色背景，形成层次感
-         * border-bottom: 1px solid #ddd — 底部 1px 分隔线，颜色 #dddddd
-         */
         .status-box h4 { margin: 0; padding: 10px; background: #eee; border-bottom: 1px solid #ddd; }
-
-        /*
-         * .players-container 玩家卡片弹性布局容器
-         * display: flex — 弹性盒布局，子元素自动横向排列
-         * flex-wrap: wrap — 允许换行，卡片过多时自动折行
-         * gap: 10px — 卡片之间间距 10px
-         * padding: 10px — 容器内边距
-         */
         .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }
-
-        /*
-         * .player-card 单个玩家信息卡片
-         * border: 1px solid #ddd — 1px 浅灰边框
-         * padding: 8px 12px — 上下 8px，左右 12px 内边距
-         * background: white — 白色背景，与灰色容器形成对比
-         * min-width: 130px — 最小宽度 130px，防止内容挤压变形
-         */
         .player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; }
-
-        /*
-         * .player-card.current 当前玩家高亮样式
-         * border-color: #3498db — 蓝色边框，标识"自己"
-         * background: #eaf4ff — 淡蓝背景
-         */
         .player-card.current { border-color: #3498db; background: #eaf4ff; }
-
-        /*
-         * .player-card.dead 已死亡玩家样式
-         * background: #d3d3d3 — 灰色背景（lightgray）
-         * color: #888 — 文字颜色变灰，弱化显示
-         * border-color: #aaa — 边框颜色也变灰
-         */
         .player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; }
-
-        /*
-         * .player-card p 卡片内段落
-         * margin: 3px 0 — 上下 3px 间距，紧凑排列信息行
-         */
         .player-card p { margin: 3px 0; }
-
-        /*
-         * .blood-buff 血祭buff标记样式
-         * color: red — 红色文字，警示含义
-         * font-weight: bold — 加粗，突出显示
-         */
         .blood-buff { color: red; font-weight: bold; }
-
-        /*
-         * .action-btn 行动按钮
-         * margin: 5px — 按钮四周间距 5px
-         * padding: 10px 20px — 上下 10px，左右 20px，保证点击区域足够大
-         * font-size: 16px — 字体大小 16px，易读
-         * cursor: pointer — 鼠标悬停时显示手型指针
-         */
         .action-btn { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-
-        /*
-         * .action-btn.active 已选中按钮高亮
-         * background: #c0e0ff — 淡蓝背景
-         */
         .action-btn.active { background: #c0e0ff; }
-
-        /*
-         * .section 操作参数区域（目标选择/城市选择）
-         * margin: 15px 0 — 上下 15px 间距
-         * display: none — 默认隐藏，选中需要参数的操作时才显示
-         * background: #f9f9f9 — 浅灰背景
-         * padding: 10px — 内边距
-         * border: 1px solid #ddd — 边框
-         */
         .section { margin: 15px 0; display: none; background: #f9f9f9; padding: 10px; border: 1px solid #ddd; }
-
-        /*
-         * .section label 参数区域标签
-         * font-weight: bold — 加粗
-         * margin-right: 10px — 标签与下拉框间距
-         */
         .section label { font-weight: bold; margin-right: 10px; }
-
-        /*
-         * select 下拉选择框
-         * padding: 5px — 内边距
-         * min-width: 150px — 最小宽度，防止选项文字被截断
-         */
         select { padding: 5px; min-width: 150px; }
-
-        /*
-         * #finalSubmit 最终确认按钮
-         * padding: 8px 25px — 上下 8px，左右 25px，宽大的点击区域
-         * font-size: 16px — 字体大小
-         * display: none — 默认隐藏，选择完操作和目标后才显示
-         */
         #finalSubmit { padding: 8px 25px; font-size: 16px; display: none; }
-
-        /*
-         * .log-box 操作记录容器
-         * border: 1px solid #ccc — 边框
-         * margin-top: 30px — 与上方元素间距
-         * background: #f9f9f9 — 背景色
-         */
         .log-box { border: 1px solid #ccc; margin-top: 30px; background: #f9f9f9; }
-
-        /*
-         * .log-box h4 操作记录标题
-         * position: sticky — 粘性定位，滚动时标题固定在顶部
-         * top: 0 — 粘在容器顶部
-         * z-index: 1 — 确保标题在滚动内容之上
-         */
         .log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
-
-        /*
-         * .log-scroll 操作记录滚动区
-         * max-height: 200px — 最大高度 200px，超出后出现滚动条
-         * overflow-y: auto — 垂直方向自动滚动
-         */
         .log-scroll { max-height: 200px; overflow-y: auto; }
-
-        /*
-         * .log-scroll ul 日志列表
-         * margin: 0 — 清除默认外边距
-         * padding: 10px 20px — 上下 10px，左右 20px
-         * list-style-position: inside — 列表标记在内部
-         */
         .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
-
-        /*
-         * .log-scroll li 单条日志
-         * margin: 3px 0 — 上下间距 3px
-         */
         .log-scroll li { margin: 3px 0; }
-
-        /*
-         * .chat-box 聊天面板容器
-         * 样式与 .log-box 相同
-         */
         .chat-box { border: 1px solid #ccc; margin-top: 20px; background: #f9f9f9; }
-
-        /*
-         * .chat-box h4 聊天面板标题（粘性定位）
-         */
         .chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
-
-        /*
-         * .chat-scroll 聊天消息滚动区
-         * max-height: 150px — 最大高度 150px
-         * overflow-y: auto — 垂直自动滚动
-         */
         .chat-scroll { max-height: 150px; overflow-y: auto; }
         .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
         .chat-scroll li { margin: 3px 0; }
-
-        /*
-         * .chat-form 聊天输入表单
-         * padding: 10px — 内边距
-         * display: flex — 弹性布局，输入框和按钮横向排列
-         * gap: 5px — 输入框和按钮间距
-         */
         .chat-form { padding: 10px; display: flex; gap: 5px; }
-
-        /*
-         * #waitMessage 等待提示区域
-         * display: none — 默认隐藏，非自己行动时显示
-         */
         #waitMessage { display: none; }
-
-        /* ===== 规则按钮（固定定位，点击弹出，不受页面滚动影响） ===== */
-
-        /*
-         * .rules-container 规则按钮容器
-         * position: fixed — 固定定位，始终在视口右上角
-         * top: 15px — 距顶部 15px
-         * right: 20px — 距右边 20px
-         * z-index: 1000 — 最高层级，确保不被其他元素遮挡
-         */
-        .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
-
-        /*
-         * .rules-btn 规则按钮
-         * padding: 8px 16px — 上下 8px，左右 16px
-         * background: #3498db — 蓝色背景
-         * color: white — 白色文字
-         * border: none — 无边框
-         * border-radius: 6px — 圆角 6px
-         * cursor: pointer — 手型指针
-         * font-size: 14px — 字体大小
-         */
-        .rules-btn {
-            padding: 8px 16px; background: #3498db; color: white; border: none;
-            border-radius: 6px; cursor: pointer; font-size: 14px;
-        }
-
-        /*
-         * .rules-popup 规则弹窗
-         * display: none — 默认隐藏
-         * position: absolute — 相对于 .rules-container 定位
-         * right: 0 — 右对齐
-         * top: 100% — 紧贴按钮下方
-         * margin-top: 5px — 与按钮的额外间距
-         * width: max-content — 宽度自适应内容
-         * max-width: 90vw — 最大宽度不超过视口 90%，防止溢出
-         * max-height: 24em — 最大高度约 24 行文字
-         * overflow-y: auto — 内容超出时垂直滚动
-         * background: #fff — 白色背景
-         * border: 2px solid #3498db — 2px 蓝色边框
-         * border-radius: 8px — 圆角 8px
-         * box-shadow: 0 4px 12px rgba(0,0,0,0.3) — 阴影：x偏移0 y偏移4px 模糊12px 30%透明度黑色
-         * padding: 15px — 内边距
-         * font-size: 13px — 规则文字大小
-         * line-height: 1.6 — 行高 1.6 倍，增加可读性
-         * color: #333 — 深灰色文字
-         * text-align: left — 左对齐
-         * white-space: normal — 正常换行
-         * word-wrap: break-word — 长单词自动断行
-         */
-        .rules-popup {
-            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-            width: max-content; max-width: 90vw;
-            max-height: 24em; overflow-y: auto;
-            background: #fff; border: 2px solid #3498db;
-            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            padding: 15px; font-size: 13px; line-height: 1.6; color: #333;
-            text-align: left;
-            white-space: normal; word-wrap: break-word;
-        }
-
-        /*
-         * .rules-popup.show 弹窗显示状态
-         * display: block — 块级显示
-         */
-        .rules-popup.show { display: block; }
-
-        /*
-         * .rules-title 弹窗标题
-         * text-align: center — 居中
-         * font-weight: bold — 加粗
-         * margin-bottom: 10px — 与正文间距
-         * font-size: 14px — 字号
-         */
-        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
-
-        /*
-         * .rules-popup p 规则段落
-         * margin: 4px 0 — 上下间距 4px，紧凑排版
-         */
-        .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
@@ -340,7 +101,7 @@
         <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
         <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
         <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
-        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制或平局的玩家数，</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
         <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
         <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
         <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
@@ -505,89 +266,14 @@
   th:inline="javascript" 启用 Thymeleaf JS 内联，支持 /*[[...]]*/ 语法
   ===================================================================
 -->
+<script th:inline="javascript" src="/js/common.js"></script>
 <script th:inline="javascript">
 
-    // roomId: 房间 UUID 字符串
-    // 由 Thymeleaf 内联表达式 /*[[${roomId}]]*/ 在服务端渲染时替换
-    // 来源: GameController 中 model.addAttribute("roomId", roomId)
-    // 类型: string（36位 UUID 格式，如 "a1b2c3d4-...-ef1234567890"）
     var roomId = /*[[${roomId}]]*/ '';
-
-    // playerId: 当前玩家 UUID 字符串
-    // 由 Thymeleaf 内联表达式 /*[[${playerId}]]*/ 在服务端渲染时替换
-    // 来源: GameController 中 model.addAttribute("playerId", playerId)
-    // 类型: string（36位 UUID 格式）
     var playerId = /*[[${playerId}]]*/ '';
-
-    /*
-     * currentData: Object|null
-     * 缓存最近一次 /api/room 返回的完整 JSON 数据
-     * 用于 selectAction()、restorePendingAction() 等函数中读取
-     *   currentPlayerLocation、availableActions、targets、cities 等字段
-     * 初始值: null（页面加载后由 fetchState() 填充）
-     */
     var currentData = null;
-
-    /*
-     * pendingAction: Object
-     * 暂存用户正在进行的行动选择，用于页面刷新后恢复状态
-     * 字段:
-     *   - type:     int|null    — 当前选中的 actionType (0-7)，未选择时为 null
-     *   - targetId: String      — 选中的目标玩家 UUID，默认为 ''
-     *   - city:     String      — 选中的目标城市名，默认为 ''
-     * 初始值: { type: null, targetId: '', city: '' }
-     * 恢复机制: showActionUI() 末尾调用 restorePendingAction(data) 恢复之前的选中状态
-     */
     var pendingAction = { type: null, targetId: '', city: '' };
-
-    // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
-
-    /*
-     * RULES_KEY: String
-     * sessionStorage 存储键名，格式: 'rulesPopupVisible_' + roomId
-     * 每个房间独立保存弹窗展开状态，不同房间互不影响
-     */
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
-
-    /*
-     * toggleRules() — 切换规则弹窗展开/收起
-     * 无参数，无返回值
-     * 副作用: 修改 #rulesPopup 的 classList（添加/移除 'show'）
-     *        更新 sessionStorage[RULES_KEY] 的值
-     */
-    function toggleRules() {
-        var popup = document.getElementById('rulesPopup');
-        popup.classList.toggle('show');
-        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
-    }
-
-    /*
-     * restoreRulesPopup() — 页面加载/刷新时恢复弹窗状态
-     * 从 sessionStorage 读取上次的展开状态
-     * 如果之前是展开的 (值为 'true')，则自动显示弹窗
-     */
-    function restoreRulesPopup() {
-        var popup = document.getElementById('rulesPopup');
-        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
-            popup.classList.add('show');
-        }
-    }
-
-    /*
-     * 全局点击监听 — 点击规则容器外部时自动关闭弹窗
-     * @param e: MouseEvent — 点击事件对象
-     * e.target: 被点击的 DOM 元素
-     * container.contains(e.target): 判断点击是否在 .rules-container 内部
-     * 如果点击在外部 → 移除 'show' 类 → 更新 sessionStorage 为 false
-     */
-    window.addEventListener('click', function(e) {
-        var container = document.querySelector('.rules-container');
-        if (!container.contains(e.target)) {
-            var popup = document.getElementById('rulesPopup');
-            popup.classList.remove('show');
-            sessionStorage.setItem(RULES_KEY, false);
-        }
-    });
 
     // ========== 游戏逻辑 ==========
 
@@ -984,152 +670,10 @@
         pendingAction.city = this.value;
     });
 
-    /*
-     * updatePlayers(players) — 更新玩家状态卡片
-     *
-     * 渲染每个玩家的信息卡片，包含:
-     *   - 玩家名称 + "（我）" 标识
-     *   - 🐴 马: 有/无
-     *   - 🔪 刀: 有/无
-     *   - ❤️ HP: 生命值
-     *   - 📍 位置: 城市名或城外
-     *   - 👣 步数: 仅步数 > 0 时显示
-     *   - 🔥 血祭: 仅 buff==true 且存活时显示
-     *
-     * CSS 类控制:
-     *   - .current: p.id === playerId（高亮自己）
-     *   - .dead: p.hp <= 0（灰色死亡样式）
-     *
-     * @param players: Array<Object> — 玩家信息数组
-     *   每项字段:
-     *     p.id:       String  — 玩家 UUID
-     *     p.name:     String  — 玩家昵称
-     *     p.hp:       int     — 生命值
-     *     p.horse:    boolean — 是否有马
-     *     p.knife:    boolean — 是否有刀
-     *     p.buff:     boolean — 是否有血祭 buff
-     *     p.location: String  — 位置
-     *     p.steps:    int     — 步数
-     */
-    function updatePlayers(players) {
-        var container = document.getElementById('playersContainer');
-        var html = '';
-        for (var i = 0; i < players.length; i++) {
-            var p = players[i];
-            var isMe = p.id === playerId;  // boolean — 是否是自己
-            var deadClass = p.hp <= 0 ? ' dead' : '';
-            var currentClass = isMe ? ' current' : '';
-
-            html += '<div class="player-card' + currentClass + deadClass + '">';
-            html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
-            html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p><p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
-            html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p><p>📍 ' + p.location + '</p>';
-            if (p.steps > 0) html += '<p>👣 ' + p.steps + '</p>';
-            if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
-            html += '</div>';
-        }
-        container.innerHTML = html;
-    }
-
-    /*
-     * updateLogs(logs) — 更新操作记录列表
-     *
-     * 优化: 仅当日志数量变化时才重新渲染（避免频繁 DOM 操作）
-     * 新消息自动滚动到底部
-     *
-     * @param logs: Array<String> — 操作日志列表（来自 data.actionLogs）
-     *   每条日志格式如: "张三 移动到城外" / "李四 刺了王五（伤害1）"
-     */
-    function updateLogs(logs) {
-        var logList = document.getElementById('logList');
-        // logList.children.length: int — 当前 DOM 中已有的 <li> 数量
-        // 仅当数量变化时才重建 HTML，减少不必要的 DOM 操作
-        if (logList.children.length !== logs.length) {
-            var html = '';
-            for (var i = 0; i < logs.length; i++) html += '<li>' + logs[i] + '</li>';
-            logList.innerHTML = html;
-            // 自动滚动到最新日志
-            // scrollTop: 滚动位置; scrollHeight: 内容总高度
-            document.getElementById('logScroll').scrollTop = document.getElementById('logScroll').scrollHeight;
-        }
-    }
-
-    /*
-     * updateChat(messages) — 更新聊天消息列表
-     *
-     * 优化: 比较 DOM 内容与数据，仅在内容变化时重新渲染
-     * 新消息自动滚动到底部
-     *
-     * @param messages: Array<String> — 聊天消息列表（来自 data.chatMessages）
-     *   每条格式如: "张三：大家好" / "李四：加油"
-     */
-    function updateChat(messages) {
-        var chatList = document.getElementById('chatList');
-        // 快速检查：数量不同肯定需要更新
-        var needUpdate = chatList.children.length !== messages.length;
-        if (!needUpdate) {
-            // 数量相同但内容不同时也需要更新
-            for (var i = 0; i < messages.length; i++) {
-                // chatList.children[i].textContent: String — 当前 DOM 中第 i 条消息的文本
-                // messages[i]: String — API 返回的第 i 条消息
-                if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
-            }
-        }
-        if (needUpdate) {
-            var html = '';
-            for (var i = 0; i < messages.length; i++) html += '<li>' + messages[i] + '</li>';
-            chatList.innerHTML = html;
-            // 自动滚动到最新消息
-            document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
-        }
-    }
-
-    /*
-     * 聊天表单提交事件
-     *
-     * API 调用: POST /api/chat/{roomId}/{playerId}
-     * 请求参数 (FormData):
-     *   - message: String — 聊天内容
-     *
-     * 流程:
-     *   1. 阻止默认表单提交 (e.preventDefault())
-     *   2. 读取 chatInput 值，空消息直接返回
-     *   3. POST 发送消息到后端
-     *   4. 清空输入框
-     *   5. 立即再次 fetch /api/room 获取最新聊天列表并更新
-     *
-     * @param e: Event — 表单提交事件对象
-     */
-    document.getElementById('chatForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        var input = document.getElementById('chatInput');
-        var message = input.value.trim();  // String — 去除首尾空白的消息内容
-        if (!message) return;
-
-        var formData = new FormData();
-        formData.append('message', message);  // String — 聊天内容
-
-        try {
-            // POST 发送聊天消息
-            await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';  // 清空输入框
-
-            // 立即获取最新聊天消息并更新 UI
-            var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
-            var data = await res.json();
-            updateChat(data.chatMessages);  // data.chatMessages: Array<String>
-        } catch (err) { console.error(err); }
-    });
-
     // ===== 页面初始化 =====
-
-    // 初始恢复规则弹窗状态（页面首次加载时）
+    initChatForm();
     restoreRulesPopup();
-
-    // 首次获取游戏状态
     fetchState();
-
-    // 每 2000 毫秒（2秒）轮询一次游戏状态
     setInterval(fetchState, 2000);
 </script>
 </body>

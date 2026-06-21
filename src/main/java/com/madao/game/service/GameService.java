@@ -53,8 +53,8 @@ import java.util.stream.Collectors;
  * <h2>并发控制</h2>
  * <ul>
  *   <li>房间容器使用 {@link ConcurrentHashMap} 保证并发读写安全</li>
- *   <li>关键写操作（创建/加入/猜拳/行动/离开）使用 {@code synchronized} 方法级锁，<b>同一房间所有操作串行化</b></li>
- *   <li>注意：{@code synchronized} 锁的是整个 GameService 实例，高并发时需要关注锁争用</li>
+ *   <li>关键写操作（加入/猜拳/行动/离开）使用 {@link ConcurrentHashMap#compute} 实现<b>按房间粒度的细粒度锁</b></li>
+ *   <li>不同房间的操作完全并行，同一房间的操作在 compute 回调中串行化</li>
  * </ul>
  *
  * <h2>清理策略</h2>
@@ -97,7 +97,7 @@ public class GameService {
      * @param playerCount 最大玩家数（至少2人）
      * @return 新房间的 UUID
      */
-    public synchronized String createRoom(int playerCount) {
+    public String createRoom(int playerCount) {
         GameRoom room = new GameRoom();
         room.setId(UUID.randomUUID().toString());           // 生成唯一房间ID
         room.setPlayerCount(playerCount);
@@ -133,98 +133,110 @@ public class GameService {
      * @return 玩家UUID（新玩家或重连玩家的ID）
      * @throws RuntimeException 房间不存在/已满/昵称冲突/已主动退出
      */
-    public synchronized String joinRoom(String roomId, String playerName) {
-        GameRoom room = rooms.get(roomId);
-        if (room == null) throw new RuntimeException("房间不存在");
+    public String joinRoom(String roomId, String playerName) {
+        // 使用 AtomicReference 传递 compute 闭包内的返回值
+        java.util.concurrent.atomic.AtomicReference<String> resultRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
 
-        // ---------- 查找房间内是否已有同名玩家（用于重连判断） ----------
-        Player existingPlayer = null;
-        for (Player p : room.getPlayers()) {
-            if (p.getName().equals(playerName)) {
-                // 从DB重新加载，确保 lastActivity 是最新的（避免内存中的过期数据）
-                existingPlayer = playerDao.findById(p.getId());
-                break;
-            }
-        }
+        rooms.compute(roomId, (id, room) -> {
+            if (room == null) throw new RuntimeException("房间不存在");
 
-        // ========== WAITING 状态：等待中，可新加入 ==========
-        if ("WAITING".equals(room.getStatus())) {
-            // --- 重连分支：同名玩家已存在 ---
-            if (existingPlayer != null) {
-                if (isPlayerOnline(existingPlayer)) {
-                    throw new RuntimeException("该昵称的玩家当前在线，无法加入");
-                }
-                // lastActivity==0 表示玩家主动离开了，不允许重连
-                if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
-                    throw new RuntimeException("您已主动退出，无法重新加入");
-                }
-                // 更新在线时间，同步到DB和内存 → 完成重连
-                existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
-                playerDao.update(existingPlayer);
-                for (Player p : room.getPlayers()) {
-                    if (p.getId().equals(existingPlayer.getId())) {
-                        p.setLastActivity(existingPlayer.getLastActivity());
-                        break;
-                    }
-                }
-                room.addLog(playerName + " 重新连接");
-                logToConsole(playerName + " 重新连接");
-                return existingPlayer.getId();
-            }
-
-            // --- 新玩家分支 ---
-            if (room.getPlayers().size() >= room.getPlayerCount()) {
-                throw new RuntimeException("房间已满");
-            }
-
-            // 创建新玩家对象
-            Player player = new Player();
-            player.setId(UUID.randomUUID().toString());
-            player.setRoomId(roomId);
-            player.setName(playerName);
-            player.setHp(10);                                // 初始生命值10
-            player.setLocation("city-" + (room.getPlayers().size() + 1)); // 每个玩家分配不同城市
-            player.setAlive(true);
-            player.setLastActivity(new Timestamp(System.currentTimeMillis()));
-            playerDao.insert(player);                        // 先持久化
-            room.getPlayers().add(player);                   // 再同步内存（CopyOnWriteArrayList 线程安全）
-
-            room.addLog(playerName + " 加入了房间");
-            logToConsole(playerName + " 加入了房间");
-
-            // 人满自动开始游戏
-            if (room.getPlayers().size() == room.getPlayerCount()) {
-                startGame(room);
-            }
-            return player.getId();
-        }
-
-        // ========== PLAYING / FINISHED 状态：游戏中，仅允许重连 ==========
-        if ("PLAYING".equals(room.getStatus()) || "FINISHED".equals(room.getStatus())) {
-            if (existingPlayer == null) {
-                throw new RuntimeException("该昵称不在房间中，无法重新加入"); // 杜绝新玩家加入进行中的游戏
-            }
-            if (isPlayerOnline(existingPlayer)) {
-                throw new RuntimeException("该昵称的玩家当前在线，无法加入");
-            }
-            if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
-                throw new RuntimeException("您已主动退出，无法重新加入");
-            }
-            // 重连：更新在线时间，同步到DB和内存
-            existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
-            playerDao.update(existingPlayer);
+            // ---------- 查找房间内是否已有同名玩家（用于重连判断） ----------
+            // 同时检查内存和DB中的玩家状态
+            Player existingPlayerInMemory = null;
             for (Player p : room.getPlayers()) {
-                if (p.getId().equals(existingPlayer.getId())) {
-                    p.setLastActivity(existingPlayer.getLastActivity());
+                if (p.getName().equals(playerName)) {
+                    existingPlayerInMemory = p;
                     break;
                 }
             }
-            room.addLog(existingPlayer.getName() + " 重新连接");
-            logToConsole(existingPlayer.getName() + " 重新连接");
-            return existingPlayer.getId();
-        }
+            // 从DB重新加载，确保 lastActivity 是最新的（避免内存中的过期数据）
+            Player existingPlayer = existingPlayerInMemory != null
+                    ? playerDao.findById(existingPlayerInMemory.getId())
+                    : null;
 
-        throw new RuntimeException("房间状态异常");
+            // ========== WAITING 状态：等待中，可新加入 ==========
+            if ("WAITING".equals(room.getStatus())) {
+                // --- 重连分支：同名玩家已存在 ---
+                if (existingPlayer != null) {
+                    // 如果同名玩家在线（5秒内有活动），拒绝新玩家加入
+                    if (isPlayerOnline(existingPlayer)) {
+                        throw new RuntimeException("该昵称的玩家当前在线，无法加入");
+                    }
+                    // lastActivity==0 表示玩家主动离开了，不允许重连
+                    if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
+                        throw new RuntimeException("该昵称的玩家已主动退出，无法重新加入");
+                    }
+                    // 更新在线时间，同步到DB和内存 → 完成重连
+                    existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
+                    playerDao.update(existingPlayer);
+                    existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                    room.addLog(playerName + " 重新连接");
+                    logToConsole(playerName + " 重新连接");
+                    resultRef.set(existingPlayer.getId());
+                    return room;
+                }
+
+                // --- 新玩家分支：确保没有同名玩家 ---
+                // 再次检查内存中的同名玩家（防止并发场景下 existingPlayer 从 DB 查不到但内存中已存在）
+                for (Player p : room.getPlayers()) {
+                    if (p.getName().equals(playerName)) {
+                        throw new RuntimeException("该昵称已被使用，请更换昵称");
+                    }
+                }
+
+                if (room.getPlayers().size() >= room.getPlayerCount()) {
+                    throw new RuntimeException("房间已满");
+                }
+
+                // 创建新玩家对象
+                Player player = new Player();
+                player.setId(UUID.randomUUID().toString());
+                player.setRoomId(roomId);
+                player.setName(playerName);
+                player.setHp(10);                                // 初始生命值10
+                player.setLocation("city-" + (room.getPlayers().size() + 1)); // 每个玩家分配不同城市
+                player.setAlive(true);
+                player.setLastActivity(new Timestamp(System.currentTimeMillis()));
+                playerDao.insert(player);                        // 先持久化
+                room.getPlayers().add(player);                   // 再同步内存（CopyOnWriteArrayList 线程安全）
+
+                room.addLog(playerName + " 加入了房间");
+                logToConsole(playerName + " 加入了房间");
+
+                // 人满自动开始游戏
+                if (room.getPlayers().size() == room.getPlayerCount()) {
+                    startGame(room);
+                }
+                resultRef.set(player.getId());
+                return room;
+            }
+
+            // ========== PLAYING / FINISHED 状态：游戏中，仅允许重连 ==========
+            if ("PLAYING".equals(room.getStatus()) || "FINISHED".equals(room.getStatus())) {
+                if (existingPlayer == null) {
+                    throw new RuntimeException("该昵称不在房间中，无法重新加入"); // 杜绝新玩家加入进行中的游戏
+                }
+                if (isPlayerOnline(existingPlayer)) {
+                    throw new RuntimeException("该昵称的玩家当前在线，无法加入");
+                }
+                if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
+                    throw new RuntimeException("您已主动退出，无法重新加入");
+                }
+                // 重连：更新在线时间，同步到DB和内存
+                existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
+                playerDao.update(existingPlayer);
+                existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                room.addLog(existingPlayer.getName() + " 重新连接");
+                logToConsole(existingPlayer.getName() + " 重新连接");
+                resultRef.set(existingPlayer.getId());
+                return room;
+            }
+
+            throw new RuntimeException("房间状态异常");
+        });
+
+        return resultRef.get();
     }
 
     /**
@@ -274,22 +286,24 @@ public class GameService {
      * @param playerId 调用者玩家UUID（必须是房主）
      * @throws RuntimeException 条件不满足时抛出
      */
-    public synchronized void forceStartGame(String roomId, String playerId) {
-        GameRoom room = rooms.get(roomId);
-        if (room == null) throw new RuntimeException("房间不存在");
-        if (!"WAITING".equals(room.getStatus())) throw new RuntimeException("游戏已经开始或已结束");
-        // 第一个加入的玩家即为房主
-        if (room.getPlayers().isEmpty() || !room.getPlayers().get(0).getId().equals(playerId)) {
-            throw new RuntimeException("只有房主才能开始游戏");
-        }
-        if (room.getPlayers().size() < 2) throw new RuntimeException("当前人数不足，至少需要2人");
+    public void forceStartGame(String roomId, String playerId) {
+        rooms.compute(roomId, (id, room) -> {
+            if (room == null) throw new RuntimeException("房间不存在");
+            if (!"WAITING".equals(room.getStatus())) throw new RuntimeException("游戏已经开始或已结束");
+            // 第一个加入的玩家即为房主
+            if (room.getPlayers().isEmpty() || !room.getPlayers().get(0).getId().equals(playerId)) {
+                throw new RuntimeException("只有房主才能开始游戏");
+            }
+            if (room.getPlayers().size() < 2) throw new RuntimeException("当前人数不足，至少需要2人");
 
-        Player host = playerDao.findById(playerId);
-        String hostName = host != null ? host.getName() : playerId;
-        room.addLog(hostName + " 强制开始游戏");
-        logToConsole(hostName + " 强制开始游戏");
+            Player host = playerDao.findById(playerId);
+            String hostName = host != null ? host.getName() : playerId;
+            room.addLog(hostName + " 强制开始游戏");
+            logToConsole(hostName + " 强制开始游戏");
 
-        startGame(room);
+            startGame(room);
+            return room;
+        });
     }
 
     /**
@@ -327,33 +341,36 @@ public class GameService {
      * @param playerId 玩家UUID
      * @param gesture  手势："石头" / "剪刀" / "布"
      */
-    public synchronized void submitGuess(String playerId, String gesture) {
+    public void submitGuess(String playerId, String gesture) {
         Player player = playerDao.findById(playerId);
         if (player == null || !player.isAlive()) return;     // 无效玩家或已死亡，忽略
 
-        // 先更新数据库
-        player.setGuess(gesture);
-        playerDao.update(player);
+        String roomId = player.getRoomId();
+        rooms.compute(roomId, (id, room) -> {
+            if (room == null) return null;
 
-        // 再同步内存中的玩家状态
-        GameRoom room = rooms.get(player.getRoomId());
-        if (room == null) return;
+            // 先更新数据库
+            player.setGuess(gesture);
+            playerDao.update(player);
 
-        for (Player p : room.getPlayers()) {
-            if (p.getId().equals(playerId)) {
-                p.setGuess(gesture);
-                break;
+            // 再同步内存中的玩家状态
+            for (Player p : room.getPlayers()) {
+                if (p.getId().equals(playerId)) {
+                    p.setGuess(gesture);
+                    break;
+                }
             }
-        }
 
-        logToConsole(player.getName() + " 出了 " + gesture);
+            logToConsole(player.getName() + " 出了 " + gesture);
 
-        // 检查是否所有存活玩家都已出拳
-        List<Player> alive = room.getAlivePlayers();
-        boolean allGuessed = alive.stream().allMatch(p -> p.getGuess() != null);
-        if (allGuessed) {
-            processGuessResult(room);                        // 全体出完 → 执行判定
-        }
+            // 检查是否所有存活玩家都已出拳
+            List<Player> alive = room.getAlivePlayers();
+            boolean allGuessed = alive.stream().allMatch(p -> p.getGuess() != null);
+            if (allGuessed) {
+                processGuessResult(room);                        // 全体出完 → 执行判定
+            }
+            return room;
+        });
     }
 
     /**
@@ -481,168 +498,203 @@ public class GameService {
      * @param cityName   目标城市名（移动/撵入操作需要）
      * @return 操作结果描述
      */
-    public synchronized String executeAction(String playerId, int actionType,
-                                             String targetId, String cityName) {
+    public String executeAction(String playerId, int actionType,
+                                 String targetId, String cityName) {
         Player dbPlayer = playerDao.findById(playerId);      // 数据库副本
-        GameRoom room = getRoom(dbPlayer.getRoomId());
-        if (dbPlayer.getSteps() <= 0) return "没有步数";       // 无步数不可行动
+        if (dbPlayer == null) return "玩家不存在";
+        String roomId = dbPlayer.getRoomId();
 
-        // 获取内存中的玩家副本
-        Player memPlayer = null;
-        for (Player p : room.getPlayers()) {
-            if (p.getId().equals(playerId)) {
-                memPlayer = p;
-                break;
+        java.util.concurrent.atomic.AtomicReference<String> resultRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        rooms.compute(roomId, (id, room) -> {
+            if (room == null) {
+                resultRef.set("房间不存在");
+                return null;
             }
-        }
-        if (memPlayer == null) return "玩家不在房间中";
+            if (dbPlayer.getSteps() <= 0) {
+                resultRef.set("没有步数");
+                return room;
+            }
 
-        boolean actionDone = false;                          // 标记行动是否有效执行
-        String logMsg = "";
-
-        switch (actionType) {
-            // ---- 0. 放弃行动 ----
-            case 0:
-                actionDone = true;
-                logMsg = dbPlayer.getName() + " 放弃行动";
-                break;
-
-            // ---- 1. 移动：城内 ↔ 城外 / 城市间穿梭 ----
-            case 1:
-                if (dbPlayer.getLocation().startsWith("city")) {
-                    // 当前在城内 → 移动到城外
-                    dbPlayer.setLocation("outside");
-                    memPlayer.setLocation("outside");
-                    logMsg = dbPlayer.getName() + " 移动到城外";
-                } else {
-                    // 当前在城外 → 必须选择一个目标城市
-                    if (cityName == null || cityName.isEmpty()) return "请选择城市";
-                    dbPlayer.setLocation(cityName);
-                    memPlayer.setLocation(cityName);
-                    logMsg = dbPlayer.getName() + " 移动到 " + cityName;
+            // 获取内存中的玩家副本
+            Player memPlayer = null;
+            for (Player p : room.getPlayers()) {
+                if (p.getId().equals(playerId)) {
+                    memPlayer = p;
+                    break;
                 }
-                actionDone = true;
-                break;
+            }
+            if (memPlayer == null) {
+                resultRef.set("玩家不在房间中");
+                return room;
+            }
 
-            // ---- 2. 购买马匹（解锁"踢"技能） ----
-            case 2:
-                if (!dbPlayer.isHorse()) {                   // 只能买一次
-                    dbPlayer.setHorse(true);
-                    memPlayer.setHorse(true);
-                    logMsg = dbPlayer.getName() + " 购买了一匹马";
+            boolean actionDone = false;                          // 标记行动是否有效执行
+            String logMsg = "";
+
+            switch (actionType) {
+                // ---- 0. 放弃行动 ----
+                case 0:
                     actionDone = true;
-                }
-                break;
+                    logMsg = dbPlayer.getName() + " 放弃行动";
+                    break;
 
-            // ---- 3. 购买刀（解锁"刺"技能） ----
-            case 3:
-                if (!dbPlayer.isKnife()) {                   // 只能买一次
-                    dbPlayer.setKnife(true);
-                    memPlayer.setKnife(true);
-                    logMsg = dbPlayer.getName() + " 购买了一把刀";
-                    actionDone = true;
-                }
-                break;
-
-            // ---- 4. 踢：骑在马上的城内攻击 ----
-            //       条件：攻击者在城内 + 有马 + 同城有目标
-            //       伤害：3点（有buff翻倍=6），目标被踢到城外
-            case 4:
-                if (!dbPlayer.getLocation().startsWith("city") || !dbPlayer.isHorse()) break;
-                if (targetId == null) return "请选择目标";
-                Player target4 = findTargetInSameLocation(dbPlayer, room, targetId); // 查找同城目标
-                if (target4 != null) {
-                    int dmg = memPlayer.isBuff() ? 6 : 3;    // buff翻倍伤害
-                    target4.setHp(target4.getHp() - dmg);
-                    target4.setLocation("outside");          // 目标被踢到城外
-                    dbPlayer.setBuff(false);                 // 消耗buff
-                    memPlayer.setBuff(false);
-                    playerDao.update(target4);               // 先持久化目标状态
-                    logMsg = dbPlayer.getName() + " 踢了 " + target4.getName() + "，造成 " + dmg + " 点伤害";
-                    if (target4.getHp() <= 0) {              // HP归零 → 死亡
-                        target4.setAlive(false);
-                        playerDao.update(target4);
-                        room.addLog(target4.getName() + " 被踢出局！");
-                        logToConsole(target4.getName() + " 被踢出局！");
-                        checkGameEnd(room);                  // 检查是否游戏结束
+                // ---- 1. 移动：城内 ↔ 城外 / 城市间穿梭 ----
+                case 1:
+                    if (dbPlayer.getLocation().startsWith("city")) {
+                        // 当前在城内 → 移动到城外
+                        dbPlayer.setLocation("outside");
+                        memPlayer.setLocation("outside");
+                        logMsg = dbPlayer.getName() + " 移动到城外";
+                    } else {
+                        // 当前在城外 → 必须选择一个目标城市
+                        if (cityName == null || cityName.isEmpty()) {
+                            resultRef.set("请选择城市");
+                            return room;
+                        }
+                        dbPlayer.setLocation(cityName);
+                        memPlayer.setLocation(cityName);
+                        logMsg = dbPlayer.getName() + " 移动到 " + cityName;
                     }
                     actionDone = true;
-                }
-                break;
+                    break;
 
-            // ---- 5. 刺：持刀攻击，不限位置（只要同位置） ----
-            //       条件：攻击者有刀 + 同位置有目标
-            //       伤害：1点（有buff翻倍=2）
-            case 5:
-                if (!dbPlayer.isKnife()) break;              // 必须有刀
-                if (targetId == null) return "请选择目标";
-                Player target5 = findTargetInSameLocation(dbPlayer, room, targetId);
-                if (target5 != null) {
-                    int dmg = memPlayer.isBuff() ? 2 : 1;    // buff翻倍伤害
-                    target5.setHp(target5.getHp() - dmg);
-                    dbPlayer.setBuff(false);                 // 消耗buff
-                    memPlayer.setBuff(false);
-                    playerDao.update(target5);
-                    logMsg = dbPlayer.getName() + " 刺了 " + target5.getName() + "，造成 " + dmg + " 点伤害";
-                    if (target5.getHp() <= 0) {
-                        target5.setAlive(false);
+                // ---- 2. 购买马匹（解锁"踢"技能） ----
+                case 2:
+                    if (!dbPlayer.isHorse()) {                   // 只能买一次
+                        dbPlayer.setHorse(true);
+                        memPlayer.setHorse(true);
+                        logMsg = dbPlayer.getName() + " 购买了一匹马";
+                        actionDone = true;
+                    }
+                    break;
+
+                // ---- 3. 购买刀（解锁"刺"技能） ----
+                case 3:
+                    if (!dbPlayer.isKnife()) {                   // 只能买一次
+                        dbPlayer.setKnife(true);
+                        memPlayer.setKnife(true);
+                        logMsg = dbPlayer.getName() + " 购买了一把刀";
+                        actionDone = true;
+                    }
+                    break;
+
+                // ---- 4. 踢：骑在马上的城内攻击 ----
+                //       条件：攻击者在城内 + 有马 + 同城有目标
+                //       伤害：3点（有buff翻倍=6），目标被踢到城外
+                case 4:
+                    if (!dbPlayer.getLocation().startsWith("city") || !dbPlayer.isHorse()) break;
+                    if (targetId == null) {
+                        resultRef.set("请选择目标");
+                        return room;
+                    }
+                    Player target4 = findTargetInSameLocation(dbPlayer, room, targetId); // 查找同城目标
+                    if (target4 != null) {
+                        int dmg = memPlayer.isBuff() ? 6 : 3;    // buff翻倍伤害
+                        target4.setHp(target4.getHp() - dmg);
+                        target4.setLocation("outside");          // 目标被踢到城外
+                        dbPlayer.setBuff(false);                 // 消耗buff
+                        memPlayer.setBuff(false);
+                        playerDao.update(target4);               // 先持久化目标状态
+                        logMsg = dbPlayer.getName() + " 踢了 " + target4.getName() + "，造成 " + dmg + " 点伤害";
+                        if (target4.getHp() <= 0) {              // HP归零 → 死亡
+                            target4.setAlive(false);
+                            playerDao.update(target4);
+                            room.addLog(target4.getName() + " 被踢出局！");
+                            logToConsole(target4.getName() + " 被踢出局！");
+                            checkGameEnd(room);                  // 检查是否游戏结束
+                        }
+                        actionDone = true;
+                    }
+                    break;
+
+                // ---- 5. 刺：持刀攻击，不限位置（只要同位置） ----
+                //       条件：攻击者有刀 + 同位置有目标
+                //       伤害：1点（有buff翻倍=2）
+                case 5:
+                    if (!dbPlayer.isKnife()) break;              // 必须有刀
+                    if (targetId == null) {
+                        resultRef.set("请选择目标");
+                        return room;
+                    }
+                    Player target5 = findTargetInSameLocation(dbPlayer, room, targetId);
+                    if (target5 != null) {
+                        int dmg = memPlayer.isBuff() ? 2 : 1;    // buff翻倍伤害
+                        target5.setHp(target5.getHp() - dmg);
+                        dbPlayer.setBuff(false);                 // 消耗buff
+                        memPlayer.setBuff(false);
                         playerDao.update(target5);
-                        room.addLog(target5.getName() + " 被刺死！");
-                        logToConsole(target5.getName() + " 被刺死！");
-                        checkGameEnd(room);
+                        logMsg = dbPlayer.getName() + " 刺了 " + target5.getName() + "，造成 " + dmg + " 点伤害";
+                        if (target5.getHp() <= 0) {
+                            target5.setAlive(false);
+                            playerDao.update(target5);
+                            room.addLog(target5.getName() + " 被刺死！");
+                            logToConsole(target5.getName() + " 被刺死！");
+                            checkGameEnd(room);
+                        }
+                        actionDone = true;
                     }
-                    actionDone = true;
-                }
-                break;
+                    break;
 
-            // ---- 6. 血祭：献祭生命获得攻击力翻倍buff ----
-            //       条件：没有buff + HP > 1（至少留1点血）
-            //       HP公式：(hp + 1) / 2 向下取整
-            case 6:
-                if (!dbPlayer.isBuff() && dbPlayer.getHp() > 1) {
-                    int newHp = (dbPlayer.getHp() + 1) / 2;  // 血祭后HP减半（向上取整）
-                    dbPlayer.setHp(newHp);
-                    dbPlayer.setBuff(true);                  // 获得buff，下次攻击伤害翻倍
-                    memPlayer.setHp(newHp);
-                    memPlayer.setBuff(true);
-                    logMsg = dbPlayer.getName() + " 血祭，生命值降为 " + newHp + "，下次攻击伤害翻倍";
-                    actionDone = true;
-                }
-                break;
+                // ---- 6. 血祭：献祭生命获得攻击力翻倍buff ----
+                //       条件：没有buff + HP > 1（至少留1点血）
+                //       HP公式：(hp + 1) / 2 向下取整
+                case 6:
+                    if (!dbPlayer.isBuff() && dbPlayer.getHp() > 1) {
+                        int newHp = (dbPlayer.getHp() + 1) / 2;  // 血祭后HP减半（向上取整）
+                        dbPlayer.setHp(newHp);
+                        dbPlayer.setBuff(true);                  // 获得buff，下次攻击伤害翻倍
+                        memPlayer.setHp(newHp);
+                        memPlayer.setBuff(true);
+                        logMsg = dbPlayer.getName() + " 血祭，生命值降为 " + newHp + "，下次攻击伤害翻倍";
+                        actionDone = true;
+                    }
+                    break;
 
-            // ---- 7. 撵入：在城外把目标强制推入某个城市 ----
-            //       条件：攻击者在城外 + 同位置有目标
-            case 7:
-                if (!"outside".equals(dbPlayer.getLocation())) break; // 必须在城外
-                if (targetId == null) return "请选择目标";
-                if (cityName == null || cityName.isEmpty()) return "请选择城市";
-                Player target7 = findTargetInSameLocation(dbPlayer, room, targetId);
-                if (target7 != null) {
-                    target7.setLocation(cityName);           // 强制改变目标位置
-                    playerDao.update(target7);
-                    logMsg = dbPlayer.getName() + " 将 " + target7.getName() + " 撵入 " + cityName;
-                    actionDone = true;
-                }
-                break;
-        }
-
-        // ---------- 行动成功后的统一处理 ----------
-        if (actionDone) {
-            dbPlayer.setSteps(dbPlayer.getSteps() - 1);      // 消耗1步
-            memPlayer.setSteps(dbPlayer.getSteps());         // 同步内存
-            playerDao.update(dbPlayer);                      // 持久化玩家状态
-            room.addLog(logMsg);
-            logToConsole(logMsg);
-        }
-
-        // 步数归零 → 轮到下一个玩家行动
-        if (dbPlayer.getSteps() <= 0) {
-            room.nextPlayer();                               // 行动队列指针后移
-            if (room.getActionQueue().isEmpty()) {           // 队列清空 = 所有人行动完毕
-                endRound(room);                              // → 结束当前回合
+                // ---- 7. 撵入：在城外把目标强制推入某个城市 ----
+                //       条件：攻击者在城外 + 同位置有目标
+                case 7:
+                    if (!"outside".equals(dbPlayer.getLocation())) break; // 必须在城外
+                    if (targetId == null) {
+                        resultRef.set("请选择目标");
+                        return room;
+                    }
+                    if (cityName == null || cityName.isEmpty()) {
+                        resultRef.set("请选择城市");
+                        return room;
+                    }
+                    Player target7 = findTargetInSameLocation(dbPlayer, room, targetId);
+                    if (target7 != null) {
+                        target7.setLocation(cityName);           // 强制改变目标位置
+                        playerDao.update(target7);
+                        logMsg = dbPlayer.getName() + " 将 " + target7.getName() + " 撵入 " + cityName;
+                        actionDone = true;
+                    }
+                    break;
             }
-        }
-        return actionDone ? "操作成功" : "操作无效";
+
+            // ---------- 行动成功后的统一处理 ----------
+            if (actionDone) {
+                dbPlayer.setSteps(dbPlayer.getSteps() - 1);      // 消耗1步
+                memPlayer.setSteps(dbPlayer.getSteps());         // 同步内存
+                playerDao.update(dbPlayer);                      // 持久化玩家状态
+                room.addLog(logMsg);
+                logToConsole(logMsg);
+            }
+
+            // 步数归零 → 轮到下一个玩家行动
+            if (dbPlayer.getSteps() <= 0) {
+                room.nextPlayer();                               // 行动队列指针后移
+                if (room.getActionQueue().isEmpty()) {           // 队列清空 = 所有人行动完毕
+                    endRound(room);                              // → 结束当前回合
+                }
+            }
+            resultRef.set(actionDone ? "操作成功" : "操作无效");
+            return room;
+        });
+
+        return resultRef.get();
     }
 
     /**
@@ -722,14 +774,15 @@ public class GameService {
      * 与 timeout（非活跃）区分开，阻止该玩家重连。</p>
      * <p>离开后检查是否所有人都已离开，如果是则立即清理房间。</p>
      */
-    public synchronized void playerLeave(String roomId, String playerId) {
-        Player player = playerDao.findById(playerId);
-        if (player != null) {
-            player.setLastActivity(new Timestamp(0));        // epoch(0) = 主动退出标记
-            playerDao.update(player);
-            // 同步内存中的玩家状态
-            GameRoom room = rooms.get(roomId);
-            if (room != null) {
+    public void playerLeave(String roomId, String playerId) {
+        rooms.compute(roomId, (id, room) -> {
+            if (room == null) return null;
+
+            Player player = playerDao.findById(playerId);
+            if (player != null) {
+                player.setLastActivity(new Timestamp(0));        // epoch(0) = 主动退出标记
+                playerDao.update(player);
+                // 同步内存中的玩家状态
                 for (Player p : room.getPlayers()) {
                     if (p.getId().equals(playerId)) {
                         p.setLastActivity(new Timestamp(0));
@@ -737,24 +790,33 @@ public class GameService {
                     }
                 }
             }
-        }
-        checkAndCleanIfAllLeft(roomId);                      // 全员离开则立即清理
+
+            // 全员离开则清理 → 返回 null 移除房间
+            if (allPlayersLeft(room)) {
+                cleanupRoomData(roomId);
+                return null;
+            }
+            return room;
+        });
     }
 
     /**
-     * 检查房间内所有玩家是否都已离开，如果是则清理房间。
-     * lastActivity < 1000ms 视为已离开（含主动退出的 epoch(0) 和异常断线的过期时间）。
+     * 检查房间内所有玩家是否都已离开。
      */
-    private void checkAndCleanIfAllLeft(String roomId) {
-        GameRoom room = rooms.get(roomId);
-        if (room == null) return;
-        boolean allLeft = room.getPlayers().stream().allMatch(p -> {
+    private boolean allPlayersLeft(GameRoom room) {
+        return room.getPlayers().stream().allMatch(p -> {
             Timestamp last = p.getLastActivity();
-            return last != null && last.getTime() < 1000;    // 离开判定阈值：1秒
+            return last != null && last.getTime() < 1000;
         });
-        if (allLeft) {
-            cleanupRoom(roomId);                             // 全部离开 → 清理
-        }
+    }
+
+    /**
+     * 仅清理数据库，不操作 rooms map（在 compute 回调中通过返回 null 来移除）。
+     */
+    private void cleanupRoomData(String roomId) {
+        playerDao.deleteByRoomId(roomId);
+        gameDao.deleteById(roomId);
+        System.out.println("房间 " + roomId + " 已被彻底清理");
     }
 
     /**
@@ -784,20 +846,14 @@ public class GameService {
             }
         }
         for (String rid : toRemove) {                        // 批量清理
-            cleanupRoom(rid);
+            rooms.compute(rid, (id, room) -> {
+                if (room != null) {
+                    cleanupRoomData(rid);
+                }
+                return null; // 返回 null 从 map 中移除
+            });
             logToConsole("定时清理房间：" + rid);
         }
-    }
-
-    /**
-     * 彻底清理房间：删除 player 表记录 → 删除 game_room 表记录 → 移除内存缓存。
-     * 按外键依赖顺序执行，确保级联安全。
-     */
-    private void cleanupRoom(String roomId) {
-        playerDao.deleteByRoomId(roomId);                    // 先删子表（player）
-        gameDao.deleteById(roomId);                          // 再删主表（game_room）
-        rooms.remove(roomId);                                // 最后移除内存缓存
-        System.out.println("房间 " + roomId + " 已被彻底清理");
     }
 
     // ==================================================================================

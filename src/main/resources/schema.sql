@@ -19,5 +19,6 @@ CREATE TABLE IF NOT EXISTS player (
     location VARCHAR(30),
     alive BOOLEAN DEFAULT TRUE,
     guess VARCHAR(10),
+    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (room_id) REFERENCES game_room(id)
     );

@@ -1,8 +1,25 @@
 <!DOCTYPE html>
+<!--
+  文件名: guess.html
+  作用: 猜拳页面 — 玩家选择石头/剪刀/布，AJAX 提交并轮询等待所有玩家完成猜拳
+  路由: GET /game/{roomId}/{playerId}?phase=GUESS  (由 GameController.game() 根据游戏阶段返回)
+  页面功能:
+    1. 实时展示所有玩家状态卡片（昵称、HP、装备、位置、步数、血祭buff）
+    2. 猜拳按钮区（石头✊、剪刀✌️、布✋），通过 AJAX POST 提交手势
+    3. 已出拳后自动切换到等待状态，显示未出拳玩家列表
+    4. 每2秒 AJAX 轮询房间状态（/api/room/{roomId}?playerId={playerId}）
+    5. 操作记录实时更新（自动滚动到底部）
+    6. 聊天功能（发送消息 + 实时显示）
+    7. 游戏结束/玩家死亡时自动跳转
+    8. 所有玩家出拳完毕 → phase 变为 ACTION → 自动跳转到行动页面
+    9. 规则弹窗状态通过 sessionStorage 保持（页面刷新不丢失）
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>马刀游戏 - 猜拳</title>
+    <link rel="stylesheet" href="/css/common.css">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .status-box { border: 1px solid #ccc; margin-bottom: 20px; background: #f9f9f9; }
@@ -27,30 +44,11 @@
         .chat-scroll li { margin: 3px 0; }
         .chat-form { padding: 10px; display: flex; gap: 5px; }
         #waitMessage { display: none; }
-
-        /* 规则按钮（点击弹出，不受刷新影响） */
-        .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
-        .rules-btn {
-            padding: 8px 16px; background: #3498db; color: white; border: none;
-            border-radius: 6px; cursor: pointer; font-size: 14px;
-        }
-        .rules-popup {
-            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-            width: max-content; max-width: 90vw;
-            max-height: 24em; overflow-y: auto;
-            background: #fff; border: 2px solid #3498db;
-            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            padding: 15px; font-size: 13px; line-height: 1.6; color: #333;
-            text-align: left;
-            white-space: normal; word-wrap: break-word;
-        }
-        .rules-popup.show { display: block; }
-        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
-        .rules-popup p { margin: 4px 0; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!-- ========== 规则弹窗（通过 sessionStorage 保持状态，AJAX 刷新不丢失） ========== -->
 <div class="rules-container">
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
     <div class="rules-popup" id="rulesPopup">
@@ -70,7 +68,8 @@
     </div>
 </div>
 
-<!-- 玩家状态区 -->
+<!-- ========== 玩家状态区 ========== -->
+<!-- 通过 JS updatePlayers() 动态渲染所有玩家卡片 -->
 <div class="status-box">
     <h4>📋 玩家状态</h4>
     <div class="players-container" id="playersContainer">
@@ -78,23 +77,33 @@
     </div>
 </div>
 
-<!-- 猜拳区 -->
+<!-- ========== 猜拳操作区 ========== -->
+<!-- 初始显示，已出拳后隐藏 -->
 <div id="guessArea">
     <h2>请出拳：</h2>
     <div class="gesture-form">
+        <!--
+          三个猜拳按钮，通过 data-gesture 属性标记手势类型
+          JS 通过 getAttribute('data-gesture') 读取，提交到 /api/guess/{roomId}/{playerId}
+          手势对应:
+            - data-gesture="石头": 赢剪刀，输布
+            - data-gesture="剪刀": 赢布，输石头
+            - data-gesture="布": 赢石头，输剪刀
+        -->
         <button data-gesture="石头">✊ 石头</button>
         <button data-gesture="剪刀">✌️ 剪刀</button>
         <button data-gesture="布">✋ 布</button>
     </div>
 </div>
 
-<!-- 等待区 -->
+<!-- ========== 等待区 ========== -->
+<!-- 默认隐藏，玩家已出拳后显示，每2秒轮询更新未出拳玩家列表 -->
 <div id="waitMessage">
     <h2>等待其他玩家猜拳...</h2>
     <div id="waitDetail"></div>
 </div>
 
-<!-- 操作记录 -->
+<!-- ========== 操作记录 ========== -->
 <div class="log-box">
     <h4>📜 操作记录</h4>
     <div class="log-scroll" id="logScroll">
@@ -102,102 +111,72 @@
     </div>
 </div>
 
-<!-- 聊天框 -->
+<!-- ========== 聊天区域 ========== -->
 <div class="chat-box">
     <h4>💬 聊天</h4>
     <div class="chat-scroll" id="chatScroll">
         <ul id="chatList"></ul>
     </div>
+    <!--
+      聊天表单
+      参数:
+        - chatInput: 文本输入框，autocomplete="off" 防止浏览器自动填充
+        - 提交事件: 通过 addEventListener('submit') 拦截，AJAX POST 发送
+      对应后端: POST /api/chat/{roomId}/{playerId}
+    -->
     <form id="chatForm" class="chat-form">
         <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
         <button type="submit">发送</button>
     </form>
 </div>
 
+<!-- ========== 核心交互脚本 ========== -->
+<script th:inline="javascript" src="/js/common.js"></script>
 <script th:inline="javascript">
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
-
-    // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
     var RULES_KEY = 'rulesPopupVisible_' + roomId;
-    function toggleRules() {
-        var popup = document.getElementById('rulesPopup');
-        popup.classList.toggle('show');
-        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
-    }
-    function restoreRulesPopup() {
-        var popup = document.getElementById('rulesPopup');
-        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
-            popup.classList.add('show');
-        }
-    }
-    window.addEventListener('click', function(e) {
-        var container = document.querySelector('.rules-container');
-        if (!container.contains(e.target)) {
-            var popup = document.getElementById('rulesPopup');
-            popup.classList.remove('show');
-            sessionStorage.setItem(RULES_KEY, false);
-        }
-    });
 
-    // ========== AJAX 状态刷新 ==========
+    // ===== AJAX 状态刷新 =====
     async function fetchState() {
         try {
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
             var res = await fetch(url);
             if (!res.ok) return;
             var data = await res.json();
-            if (!data.status) {
-                window.location.href = '/';
-                return;
-            }
+            if (!data.status) { window.location.href = '/'; return; }
 
             updatePlayers(data.players);
             updateLogs(data.actionLogs);
             updateChat(data.chatMessages);
 
-            // 游戏结束
-            if (data.status === 'FINISHED') {
-                window.location.href = '/game/' + roomId + '/' + playerId;
-                return;
-            }
-            // 玩家死亡
-            if (!data.currentPlayerAlive) {
-                window.location.href = '/game/' + roomId + '/' + playerId;
-                return;
-            }
+            if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; return; }
+            if (!data.currentPlayerAlive) { window.location.href = '/game/' + roomId + '/' + playerId; return; }
 
-            // 根据阶段切换显示
             if (data.phase === 'GUESS') {
                 if (data.currentPlayerGuess == null) {
-                    // 还没出拳，显示猜拳按钮
                     document.getElementById('guessArea').style.display = 'block';
                     document.getElementById('waitMessage').style.display = 'none';
                 } else {
-                    // 已出拳，等待他人
                     document.getElementById('guessArea').style.display = 'none';
                     document.getElementById('waitMessage').style.display = 'block';
                     var detailDiv = document.getElementById('waitDetail');
                     if (data.playersNotGuessed && data.playersNotGuessed.length > 0) {
-                        var items = data.playersNotGuessed.map(function(n) { return '<li>' + n + '</li>'; }).join('');
+                        var items = data.playersNotGuessed.map(function(n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('');
                         detailDiv.innerHTML = '<p>等待以下玩家出拳：</p><ul>' + items + '</ul>';
                     } else {
                         detailDiv.innerHTML = '';
                     }
                 }
             } else if (data.phase === 'ACTION') {
-                // 自动跳转到行动页
                 window.location.href = '/game/' + roomId + '/' + playerId;
             }
 
-            // ★ 恢复规则弹窗状态
             restoreRulesPopup();
-        } catch (e) {
-            console.error('状态刷新失败', e);
-        }
+        } catch (e) { console.error('状态刷新失败', e); }
     }
 
-    // ========== 猜拳提交 ==========
+    // ===== 猜拳提交 =====
     var gestureButtons = document.querySelectorAll('.gesture-form button');
     gestureButtons.forEach(function(btn) {
         btn.addEventListener('click', async function() {
@@ -206,90 +185,15 @@
             formData.append('gesture', gesture);
             try {
                 await fetch('/api/guess/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-                // 立即刷新状态，界面将变为等待状态
                 fetchState();
-            } catch (e) {
-                console.error('猜拳提交失败', e);
-            }
+            } catch (e) { console.error('猜拳提交失败', e); }
         });
     });
 
-    // ========== UI 更新函数 ==========
-    function updatePlayers(players) {
-        var container = document.getElementById('playersContainer');
-        var html = '';
-        for (var i = 0; i < players.length; i++) {
-            var p = players[i];
-            var isMe = p.id === playerId;
-            var deadClass = p.hp <= 0 ? ' dead' : '';
-            var currentClass = isMe ? ' current' : '';
-            html += '<div class="player-card' + currentClass + deadClass + '">';
-            html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
-            html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
-            html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
-            html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';
-            html += '<p>📍 ' + p.location + '</p>';
-            if (p.steps > 0) html += '<p>👣 ' + p.steps + '</p>';
-            if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
-            html += '</div>';
-        }
-        container.innerHTML = html;
-    }
+    // ===== 聊天发送（使用 common.js 中的 initChatForm） =====
+    initChatForm();
 
-    function updateLogs(logs) {
-        var logList = document.getElementById('logList');
-        if (logList.children.length !== logs.length) {
-            var html = '';
-            for (var i = 0; i < logs.length; i++) {
-                html += '<li>' + logs[i] + '</li>';
-            }
-            logList.innerHTML = html;
-            // 自动滚动到底部
-            var logScroll = document.getElementById('logScroll');
-            logScroll.scrollTop = logScroll.scrollHeight;
-        }
-    }
-
-    function updateChat(messages) {
-        var chatList = document.getElementById('chatList');
-        var needUpdate = chatList.children.length !== messages.length;
-        if (!needUpdate) {
-            for (var i = 0; i < messages.length; i++) {
-                if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
-            }
-        }
-        if (needUpdate) {
-            var html = '';
-            for (var i = 0; i < messages.length; i++) {
-                html += '<li>' + messages[i] + '</li>';
-            }
-            chatList.innerHTML = html;
-            // 自动滚动到底部
-            var chatScroll = document.getElementById('chatScroll');
-            chatScroll.scrollTop = chatScroll.scrollHeight;
-        }
-    }
-
-    // ========== 聊天发送 ==========
-    document.getElementById('chatForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        var input = document.getElementById('chatInput');
-        var message = input.value.trim();
-        if (!message) return;
-        var formData = new FormData();
-        formData.append('message', message);
-        try {
-            await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
-            input.value = '';
-            var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
-            var data = await res.json();
-            updateChat(data.chatMessages);
-        } catch (err) {
-            console.error(err);
-        }
-    });
-
-    // ========== 定时刷新 ==========
+    // ===== 定时刷新 =====
     restoreRulesPopup();
     fetchState();
     setInterval(fetchState, 2000);

@@ -1,9 +1,23 @@
 <!DOCTYPE html>
+<!--
+  文件名: lobby.html
+  作用: 等待大厅 — 展示房间信息与当前玩家列表，等待其他玩家加入，人数凑齐或房主手动开始后进入游戏
+  路由: GET /lobby/{roomId}/{playerId}  (由 GameController.lobby() 返回)
+  页面功能:
+    1. 显示房间ID（支持一键复制，便于分享给其他玩家）
+    2. 显示房间状态、当前人数/目标人数
+    3. 每3秒 AJAX 轮询，实时同步玩家加入/离开
+    4. 房主可见"直接开始"按钮，无需等待满员即可强制开始游戏
+    5. 当房间状态变为 PLAYING 时，自动跳转到游戏页面
+    6. "返回首页"链接用于离开房间
+-->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" th:attr="content='3; url=/lobby/' + ${roomId} + '/' + ${playerId}">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>马刀游戏 - 等待大厅</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <script src="/js/common.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
@@ -19,27 +33,13 @@
         .start-btn { padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 0; }
         .start-btn:hover { background: #27ae60; }
         .error-msg { color: red; margin: 10px 0; }
-
-        /* 规则按钮 */
-        .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
-        .rules-btn {
-            padding: 8px 16px; background: #3498db; color: white; border: none;
-            border-radius: 6px; cursor: pointer; font-size: 14px;
-        }
-        .rules-popup {
-            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-            width: max-content; max-width: 90vw; max-height: 24em; overflow-y: auto;
-            background: #fff; border: 2px solid #3498db; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 15px; font-size: 13px;
-            line-height: 1.6; color: #333; text-align: left; white-space: normal; word-wrap: break-word;
-        }
-        .rules-popup.show { display: block; }
-        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
-        .rules-popup p { margin: 4px 0; }
+        .players-list { margin: 10px 0; }
+        .players-list li { padding: 5px 0; border-bottom: 1px solid #eee; }
     </style>
 </head>
 <body>
-<!-- 规则按钮 -->
+
+<!-- ========== 规则弹窗 ========== -->
 <div class="rules-container">
     <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
     <div class="rules-popup" id="rulesPopup">
@@ -59,24 +59,35 @@
     </div>
 </div>
 
+<!-- ========== 主内容区 ========== -->
 <div class="container">
     <h1>等待大厅</h1>
+
     <p class="room-id">
         房间ID：<strong id="roomIdText" th:text="${room.id}"></strong>
-        <button class="copy-btn" th:attr="data-roomid=${room.id}" onclick="copyRoomId(this)">复制</button>
+        <button class="copy-btn" id="copyBtn">复制</button>
         <span id="copyHint" class="hint">👉 按 Ctrl+C 复制</span>
     </p>
+
     <div class="info">
-        <p>状态：<span th:text="${room.status}"></span></p>
-        <p>当前人数：<span th:text="${#lists.size(room.players)}"></span> / <span th:text="${room.playerCount}"></span></p>
-        <div th:if="${room.status == 'PLAYING'}">
+        <p>状态：<span id="statusText" th:text="${room.status}"></span></p>
+        <p>当前人数：<span id="playerCountText"></span> / <span th:text="${room.playerCount}"></span></p>
+        <div id="gameStarting" style="display:none">
             <p>游戏即将开始，正在跳转...</p>
         </div>
         <p style="color:gray">页面每3秒自动刷新，等待其他玩家加入...</p>
     </div>
 
-    <!-- 房主可见：直接开始按钮 -->
-    <div th:if="${player != null and !room.players.isEmpty() and player.id == room.players[0].id}">
+    <!-- ===== 玩家列表 ===== -->
+    <div class="players-list">
+        <h4>当前玩家：</h4>
+        <ul id="playersList">
+            <li>加载中...</li>
+        </ul>
+    </div>
+
+    <!-- ===== 房主直接开始按钮 ===== -->
+    <div th:if="${player != null and !room.players.isEmpty() and player.id == room.players.get(0).id}">
         <button class="start-btn" onclick="forceStart()">直接开始</button>
         <div id="startError" class="error-msg"></div>
     </div>
@@ -84,52 +95,52 @@
     <a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" class="back-link">返回首页</a>
 </div>
 
+<!-- ========== 页面交互脚本 ========== -->
 <script th:inline="javascript">
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
+    var RULES_KEY = 'rulesPopupVisible_lobby_' + roomId;
 
-    // 规则弹窗
+    // ===== 规则弹窗 =====
     function toggleRules() {
         var popup = document.getElementById('rulesPopup');
         popup.classList.toggle('show');
+        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
     }
+    (function() {
+        var popup = document.getElementById('rulesPopup');
+        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
+            popup.classList.add('show');
+        }
+    })();
     window.addEventListener('click', function(e) {
         var container = document.querySelector('.rules-container');
         if (!container.contains(e.target)) {
             document.getElementById('rulesPopup').classList.remove('show');
+            sessionStorage.setItem(RULES_KEY, false);
         }
     });
 
-    // 复制房间ID
-    function copyRoomId(btn) {
-        var roomId = btn.getAttribute('data-roomid');
-        var textarea = document.createElement("textarea");
-        textarea.value = roomId;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-            document.execCommand('copy');
+    // ===== 复制房间ID（使用 Clipboard API） =====
+    document.getElementById('copyBtn').addEventListener('click', function() {
+        var roomIdText = document.getElementById('roomIdText').textContent;
+        navigator.clipboard.writeText(roomIdText).then(function() {
             var hint = document.getElementById('copyHint');
             hint.textContent = '✓ 已复制！';
             hint.style.display = 'inline';
             hint.style.color = 'green';
             setTimeout(function() { hint.style.display = 'none'; }, 2000);
-        } catch (err) {
+        }).catch(function() {
             alert("复制失败，请手动复制。");
-        }
-        document.body.removeChild(textarea);
-    }
+        });
+    });
 
-    // 房主强制开始
+    // ===== 房主强制开始 =====
     async function forceStart() {
         var errorDiv = document.getElementById('startError');
         errorDiv.textContent = '';
         try {
-            var response = await fetch('/lobby/' + roomId + '/' + playerId + '/start', {
-                method: 'POST'
-            });
+            var response = await fetch('/lobby/' + roomId + '/' + playerId + '/start', { method: 'POST' });
             var data = await response.json();
             if (data.success) {
                 window.location.href = '/game/' + roomId + '/' + playerId;
@@ -140,6 +151,38 @@
             errorDiv.textContent = '请求失败，请稍后重试';
         }
     }
+
+    // ===== AJAX 轮询（替代 meta refresh） =====
+    async function pollState() {
+        try {
+            var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
+            if (!res.ok) return;
+            var data = await res.json();
+            if (!data.status) { window.location.href = '/'; return; }
+
+            // 更新状态
+            document.getElementById('statusText').textContent = data.status;
+            document.getElementById('playerCountText').textContent = data.players.length;
+
+            // 游戏已开始 → 跳转
+            if (data.status === 'PLAYING') {
+                document.getElementById('gameStarting').style.display = 'block';
+                window.location.href = '/game/' + roomId + '/' + playerId;
+                return;
+            }
+
+            // 更新玩家列表
+            var listHtml = '';
+            for (var i = 0; i < data.players.length; i++) {
+                var p = data.players[i];
+                listHtml += '<li>' + escapeHtml(p.name) + (p.id === playerId ? '（我）' : '') + '</li>';
+            }
+            document.getElementById('playersList').innerHTML = listHtml;
+        } catch (e) { console.error('轮询失败', e); }
+    }
+
+    pollState();
+    setInterval(pollState, 3000);
 </script>
 </body>
 </html>

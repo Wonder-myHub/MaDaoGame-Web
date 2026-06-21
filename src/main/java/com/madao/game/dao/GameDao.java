@@ -35,7 +35,7 @@ public class GameDao {
             ps.setString(6, room.getWinner());        // 胜利者（初始为 null）
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("插入房间记录失败", e);
         }
     }
 
@@ -49,8 +49,8 @@ public class GameDao {
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
                 GameRoom room = new GameRoom();
                 room.setId(rs.getString("id"));
                 room.setPlayerCount(rs.getInt("player_count"));
@@ -60,8 +60,9 @@ public class GameDao {
                 room.setWinner(rs.getString("winner"));
                 return room;
             }
+            }
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("查询房间记录失败", e);
         }
         return null;  // 未找到对应房间
     }
@@ -82,7 +83,7 @@ public class GameDao {
             ps.setString(5, room.getId());
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("更新房间状态失败", e);
         }
     }
 
@@ -98,7 +99,7 @@ public class GameDao {
             ps.setString(1, id);
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("删除房间记录失败", e);
         }
     }
 }

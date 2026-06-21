@@ -49,7 +49,7 @@ public class PlayerDao {
                     : new Timestamp(System.currentTimeMillis()));
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("插入玩家记录失败", e);
         }
     }
 
@@ -64,8 +64,8 @@ public class PlayerDao {
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, roomId);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {                                    // 遍历所有结果
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {                                    // 遍历所有结果
                 Player p = new Player();
                 p.setId(rs.getString("id"));
                 p.setRoomId(rs.getString("room_id"));
@@ -81,8 +81,9 @@ public class PlayerDao {
                 p.setLastActivity(rs.getTimestamp("last_activity"));
                 list.add(p);
             }
+            }
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("按房间ID查询玩家失败", e);
         }
         return list;
     }
@@ -97,8 +98,8 @@ public class PlayerDao {
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {                                       // 最多一条记录
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {                                       // 最多一条记录
                 Player p = new Player();
                 p.setId(rs.getString("id"));
                 p.setRoomId(rs.getString("room_id"));
@@ -114,8 +115,9 @@ public class PlayerDao {
                 p.setLastActivity(rs.getTimestamp("last_activity"));
                 return p;
             }
+            }
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("按玩家ID查询失败", e);
         }
         return null;  // 未找到对应玩家
     }
@@ -144,7 +146,7 @@ public class PlayerDao {
             ps.setString(10, player.getId());
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("更新玩家状态失败", e);
         }
     }
 
@@ -160,7 +162,7 @@ public class PlayerDao {
             ps.setString(1, roomId);
             ps.executeUpdate();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new RuntimeException("按房间ID删除玩家失败", e);
         }
     }
 }
