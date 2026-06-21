@@ -91,12 +91,12 @@ function updatePlayers(players) {
 
         html += '<div class="player-card' + currentClass + deadClass + '">';
         html += '<p><strong>' + escapeHtml(p.name) + '</strong>' + (isMe ? '（我）' : '') + '</p>';
-        html += '<p>\u{1F434} ' + (p.horse ? '有' : '无') + '</p>';
-        html += '<p>\u{1F52A} ' + (p.knife ? '有' : '无') + '</p>';
-        html += '<p>\u2764\uFE0F ' + (p.hp > 0 ? p.hp : 0) + '</p>';
-        html += '<p>\u{1F4CD} ' + escapeHtml(p.location) + '</p>';
-        if (p.steps > 0) html += '<p>\u{1F463} ' + p.steps + '</p>';
-        if (p.buff && p.hp > 0) html += '<p class="blood-buff">\u{1F525} 血祭</p>';
+        html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
+        html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
+        html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';
+        html += '<p>📍 ' + escapeHtml(p.location) + '</p>';
+        if (p.steps > 0) html += '<p>👣 ' + p.steps + '</p>';
+        if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
         html += '</div>';
     }
     container.innerHTML = html;
