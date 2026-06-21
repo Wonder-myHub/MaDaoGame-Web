@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" th:attr="content='3; url=/lobby/' + ${roomId} + '/' + ${playerId}">
+    <title>马刀游戏 - 等待大厅</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; }
+        .room-id { font-size: 18px; margin-bottom: 15px; display: flex; align-items: center; background: #eef; padding: 10px; border-radius: 5px; }
+        .room-id strong { margin-right: 10px; user-select: all; }
+        .copy-btn { padding: 5px 15px; cursor: pointer; background: #3498db; color: white; border: none; border-radius: 4px; }
+        .copy-btn:hover { background: #2980b9; }
+        .info p { margin: 10px 0; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 10px 20px; background: #e74c3c; color: white; text-decoration: none; border-radius: 5px; }
+        .back-link:hover { background: #c0392b; }
+        .hint { color: #666; font-size: 14px; margin-left: 10px; display: none; }
+        .start-btn { padding: 10px 20px; background: #2ecc71; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 0; }
+        .start-btn:hover { background: #27ae60; }
+        .error-msg { color: red; margin: 10px 0; }
+
+        /* 规则按钮 */
+        .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+        .rules-btn {
+            padding: 8px 16px; background: #3498db; color: white; border: none;
+            border-radius: 6px; cursor: pointer; font-size: 14px;
+        }
+        .rules-popup {
+            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
+            width: max-content; max-width: 90vw; max-height: 24em; overflow-y: auto;
+            background: #fff; border: 2px solid #3498db; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 15px; font-size: 13px;
+            line-height: 1.6; color: #333; text-align: left; white-space: normal; word-wrap: break-word;
+        }
+        .rules-popup.show { display: block; }
+        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+        .rules-popup p { margin: 4px 0; }
+    </style>
+</head>
+<body>
+<!-- 规则按钮 -->
+<div class="rules-container">
+    <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <div class="rules-popup" id="rulesPopup">
+        <div class="rules-title">马刀游戏规则</div>
+        <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
+        <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
+        <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
+        <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
+        <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
+        <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
+        <p>马：只能在城内使用，当有其它玩家与你在同一个城内时，可以消耗一次步数，将他踢到城外（踢出去）</p>
+        <p>同时他会减少3点生命值。</p>
+        <p>刀：可以在城内或城外使用，当有其它玩家与你在同一个区域时，可以消耗一次步数，刺他一刀，他会减少1点生命值。</p>
+        <p>血祭：消耗一次步数，生命值减至一半，向上取整（1点生命值时无法血祭），下一次的攻击翻2倍（可跨回合）不可叠加。</p>
+        <p>撵进去：当你与其它玩家在城外时，可以消耗一次步数，将其中一个玩家撵入一个城内。</p>
+    </div>
+</div>
+
+<div class="container">
+    <h1>等待大厅</h1>
+    <p class="room-id">
+        房间ID：<strong id="roomIdText" th:text="${room.id}"></strong>
+        <button class="copy-btn" th:attr="data-roomid=${room.id}" onclick="copyRoomId(this)">复制</button>
+        <span id="copyHint" class="hint">👉 按 Ctrl+C 复制</span>
+    </p>
+    <div class="info">
+        <p>状态：<span th:text="${room.status}"></span></p>
+        <p>当前人数：<span th:text="${#lists.size(room.players)}"></span> / <span th:text="${room.playerCount}"></span></p>
+        <div th:if="${room.status == 'PLAYING'}">
+            <p>游戏即将开始，正在跳转...</p>
+        </div>
+        <p style="color:gray">页面每3秒自动刷新，等待其他玩家加入...</p>
+    </div>
+
+    <!-- 房主可见：直接开始按钮 -->
+    <div th:if="${player != null and !room.players.isEmpty() and player.id == room.players[0].id}">
+        <button class="start-btn" onclick="forceStart()">直接开始</button>
+        <div id="startError" class="error-msg"></div>
+    </div>
+
+    <a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" class="back-link">返回首页</a>
+</div>
+
+<script th:inline="javascript">
+    var roomId = /*[[${roomId}]]*/ '';
+    var playerId = /*[[${playerId}]]*/ '';
+
+    // 规则弹窗
+    function toggleRules() {
+        var popup = document.getElementById('rulesPopup');
+        popup.classList.toggle('show');
+    }
+    window.addEventListener('click', function(e) {
+        var container = document.querySelector('.rules-container');
+        if (!container.contains(e.target)) {
+            document.getElementById('rulesPopup').classList.remove('show');
+        }
+    });
+
+    // 复制房间ID
+    function copyRoomId(btn) {
+        var roomId = btn.getAttribute('data-roomid');
+        var textarea = document.createElement("textarea");
+        textarea.value = roomId;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            var hint = document.getElementById('copyHint');
+            hint.textContent = '✓ 已复制！';
+            hint.style.display = 'inline';
+            hint.style.color = 'green';
+            setTimeout(function() { hint.style.display = 'none'; }, 2000);
+        } catch (err) {
+            alert("复制失败，请手动复制。");
+        }
+        document.body.removeChild(textarea);
+    }
+
+    // 房主强制开始
+    async function forceStart() {
+        var errorDiv = document.getElementById('startError');
+        errorDiv.textContent = '';
+        try {
+            var response = await fetch('/lobby/' + roomId + '/' + playerId + '/start', {
+                method: 'POST'
+            });
+            var data = await response.json();
+            if (data.success) {
+                window.location.href = '/game/' + roomId + '/' + playerId;
+            } else {
+                errorDiv.textContent = data.error;
+            }
+        } catch (err) {
+            errorDiv.textContent = '请求失败，请稍后重试';
+        }
+    }
+</script>
+</body>
+</html>

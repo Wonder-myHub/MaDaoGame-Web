@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>马刀游戏 - 游戏结束</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .winner-section { margin: 30px auto; padding: 20px; }
+        .trophy { font-size: 80px; animation: bounce 1.5s infinite; display: block; }
+        @keyframes bounce {
+            0%,100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+        .winner-text {
+            font-size: 48px; font-weight: bold; color: #ffd700;
+            text-shadow: 0 0 20px #ff8c00, 0 0 40px #ff4500;
+            margin: 20px 0; animation: glow 2s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { text-shadow: 0 0 10px #ffd700, 0 0 20px #ff8c00; }
+            to { text-shadow: 0 0 30px #ffd700, 0 0 60px #ff4500, 0 0 80px #ff0000; }
+        }
+        .winner-name {
+            font-size: 36px; background: rgba(255,215,0,0.2);
+            display: inline-block; padding: 10px 30px; border-radius: 50px;
+            border: 2px solid #ffd700; margin-top: 10px; animation: slideIn 1s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .confetti { position: fixed; top:-100px; width:10px; height:10px; background:#ff0; animation:fall linear infinite; z-index:0; }
+        @keyframes fall {
+            to { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        .status-box {
+            border: 1px solid #ffd700;
+            margin: 30px auto;
+            max-width: 700px;
+            text-align: left;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
+            border-radius: 10px;
+            position: relative; z-index: 1;
+        }
+        .status-box h4 {
+            margin: 0; padding: 12px 20px;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid #ffd700;
+            color: #ffd700;
+            border-radius: 10px 10px 0 0;
+        }
+        .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 15px; justify-content: center; }
+        .player-card {
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.05);
+            min-width: 130px;
+            border-radius: 8px;
+            color: white;
+        }
+        .player-card.current { border-color: #ffd700; background: rgba(255,215,0,0.2); }
+        .player-card.dead { background: rgba(100,100,100,0.3); color: #aaa; border-color: #666; }
+        .player-card p { margin: 4px 0; }
+        .blood-buff { color: #ff4444; font-weight: bold; }
+        .log-box {
+            border: 1px solid #ffd700;
+            margin: 30px auto;
+            max-width: 700px;
+            text-align: left;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            position: relative; z-index: 1;
+        }
+        .log-box h4 {
+            margin: 0; padding: 12px 20px;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid #ffd700;
+            color: #ffd700;
+            border-radius: 10px 10px 0 0;
+        }
+        .log-scroll { max-height: 200px; overflow-y: auto; }
+        .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
+        .log-scroll li { margin: 3px 0; }
+        .chat-box {
+            border: 1px solid #ffd700;
+            margin: 20px auto;
+            max-width: 700px;
+            text-align: left;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            position: relative; z-index: 1;
+        }
+        .chat-box h4 {
+            margin: 0; padding: 12px 20px;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid #ffd700;
+            color: #ffd700;
+            border-radius: 10px 10px 0 0;
+        }
+        .chat-scroll { max-height: 150px; overflow-y: auto; }
+        .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; color: #ccc; }
+        .chat-scroll li { margin: 3px 0; }
+        .chat-form { padding: 10px; display: flex; gap: 5px; }
+        a {
+            display: inline-block; margin-top: 20px; padding: 12px 30px;
+            background: #ffd700; color: #1a1a2e; text-decoration: none;
+            border-radius: 50px; font-weight: bold; font-size: 16px;
+            position: relative; z-index: 1; transition: 0.3s;
+        }
+        a:hover { background: #ffed4a; transform: scale(1.05); }
+
+        /* 规则按钮（深色主题适配） */
+        .rules-container { position: fixed; top: 15px; right: 20px; z-index: 1000; }
+        .rules-btn {
+            padding: 8px 16px; background: #3498db; color: white; border: none;
+            border-radius: 6px; cursor: pointer; font-size: 14px;
+        }
+        .rules-popup {
+            display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
+            width: max-content; max-width: 90vw;
+            max-height: 24em; overflow-y: auto;
+            background: #222; border: 2px solid #ffd700;
+            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+            padding: 15px; font-size: 13px; line-height: 1.6; color: #eee;
+            text-align: left;
+            white-space: normal; word-wrap: break-word;
+        }
+        .rules-popup.show { display: block; }
+        .rules-title { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 14px; color: #ffd700; }
+        .rules-popup p { margin: 4px 0; }
+    </style>
+</head>
+<body>
+<!-- 规则按钮 -->
+<div class="rules-container">
+    <button class="rules-btn" onclick="toggleRules()">📜 规则</button>
+    <div class="rules-popup" id="rulesPopup">
+        <div class="rules-title">马刀游戏规则</div>
+        <p>初始情况：一个人有一座城，玩家在各自的城内，中间是一块空地（城外），与每个城相连接，除此外无其它连接。</p>
+        <p>通过消耗步数可以移动或攻击其它玩家。每个玩家有10点生命值，当生命值减至0时，该玩家出局。</p>
+        <p>获胜条件：当游戏只剩下一位玩家时，该玩家获胜。</p>
+        <p>步数：通过石头、剪刀、布获得，在胜负局中，每一个获胜的人可以获得，其数量为获胜拳所克制的玩家数，</p>
+        <p>消耗一次步数行动一次。当存在多位玩家有步数时，行使步数的顺序随机，且必须在同一回合内一次性消耗完所有步数。</p>
+        <p>移动：消耗一次步数，从某一城内移到城外，或从城外移到某一城内。</p>
+        <p>攻击：攻击需要使用武器，消耗一次步数可以获得马或刀（买马、买刀）</p>
+        <p>马：只能在城内使用，当有其它玩家与你在同一个城内时，可以消耗一次步数，将他踢到城外（踢出去）</p>
+        <p>同时他会减少3点生命值。</p>
+        <p>刀：可以在城内或城外使用，当有其它玩家与你在同一个区域时，可以消耗一次步数，刺他一刀，他会减少1点生命值。</p>
+        <p>血祭：消耗一次步数，生命值减至一半，向上取整（1点生命值时无法血祭），下一次的攻击翻2倍（可跨回合）不可叠加。</p>
+        <p>撵进去：当你与其它玩家在城外时，可以消耗一次步数，将其中一个玩家撵入一个城内。</p>
+    </div>
+</div>
+
+<div id="confettiContainer"></div>
+
+<div class="winner-section" id="winnerSection">
+    <span class="trophy">🏆</span>
+    <div class="winner-text">🎉 游戏结束 🎉</div>
+    <div class="winner-name" id="winnerName">加载中...</div>
+</div>
+
+<div class="status-box">
+    <h4>📋 最终状态</h4>
+    <div class="players-container" id="playersContainer">
+        <p>加载中...</p>
+    </div>
+</div>
+
+<div class="log-box">
+    <h4>📜 操作记录</h4>
+    <div class="log-scroll" id="logScroll">
+        <ul id="logList"></ul>
+    </div>
+</div>
+
+<div class="chat-box">
+    <h4>💬 聊天</h4>
+    <div class="chat-scroll" id="chatScroll">
+        <ul id="chatList"></ul>
+    </div>
+    <form id="chatForm" class="chat-form">
+        <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
+        <button type="submit">发送</button>
+    </form>
+</div>
+
+<a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" id="leaveLink">返回首页</a>
+
+<script th:inline="javascript">
+    var roomId = /*[[${roomId}]]*/ '';
+    var playerId = /*[[${playerId}]]*/ '';
+
+    // ========== 规则弹窗控制（状态存储到 sessionStorage） ==========
+    var RULES_KEY = 'rulesPopupVisible_' + roomId;
+    function toggleRules() {
+        var popup = document.getElementById('rulesPopup');
+        popup.classList.toggle('show');
+        sessionStorage.setItem(RULES_KEY, popup.classList.contains('show'));
+    }
+    function restoreRulesPopup() {
+        var popup = document.getElementById('rulesPopup');
+        if (popup && sessionStorage.getItem(RULES_KEY) === 'true') {
+            popup.classList.add('show');
+        }
+    }
+    window.addEventListener('click', function(e) {
+        var container = document.querySelector('.rules-container');
+        if (!container.contains(e.target)) {
+            var popup = document.getElementById('rulesPopup');
+            popup.classList.remove('show');
+            sessionStorage.setItem(RULES_KEY, false);
+        }
+    });
+
+    // 纸屑动画
+    function createConfetti() {
+        var colors = ['#ffd700', '#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#ff9ff3'];
+        var container = document.getElementById('confettiContainer');
+        for (var i = 0; i < 100; i++) {
+            var confetti = document.createElement('div');
+            confetti.className = 'confetti';
+            confetti.style.left = Math.random() * 100 + '%';
+            confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
+            confetti.style.width = (Math.random() * 10 + 5) + 'px';
+            confetti.style.height = (Math.random() * 10 + 5) + 'px';
+            confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+            confetti.style.animationDelay = Math.random() * 5 + 's';
+            container.appendChild(confetti);
+        }
+    }
+    window.addEventListener('load', createConfetti);
+
+    // ========== AJAX 刷新 ==========
+    async function fetchState() {
+        try {
+            var url = '/api/room/' + roomId + '?playerId=' + playerId;
+            var res = await fetch(url);
+            if (!res.ok) return;
+            var data = await res.json();
+            if (!data.status) {
+                window.location.href = '/';
+                return;
+            }
+            if (data.winner) {
+                document.getElementById('winnerName').textContent = '胜利者：' + data.winner;
+            }
+            updatePlayers(data.players);
+            updateLogs(data.actionLogs);
+            updateChat(data.chatMessages);
+
+            // 恢复规则弹窗状态
+            restoreRulesPopup();
+        } catch (e) { console.error(e); }
+    }
+
+    function updatePlayers(players) {
+        if (!players) return;
+        var container = document.getElementById('playersContainer');
+        var html = '';
+        for (var i = 0; i < players.length; i++) {
+            var p = players[i];
+            var isMe = p.id === playerId;
+            var deadClass = p.hp <= 0 ? ' dead' : '';
+            var currentClass = isMe ? ' current' : '';
+            html += '<div class="player-card' + currentClass + deadClass + '">';
+            html += '<p><strong>' + p.name + '</strong>' + (isMe ? '（我）' : '') + '</p>';
+            html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
+            html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
+            html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';
+            html += '<p>📍 ' + p.location + '</p>';
+            if (p.buff && p.hp > 0) html += '<p class="blood-buff">🔥 血祭</p>';
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function updateLogs(logs) {
+        if (!logs) return;
+        var logList = document.getElementById('logList');
+        if (logList.children.length !== logs.length) {
+            var html = '';
+            for (var i = 0; i < logs.length; i++) html += '<li>' + logs[i] + '</li>';
+            logList.innerHTML = html;
+            document.getElementById('logScroll').scrollTop = document.getElementById('logScroll').scrollHeight;
+        }
+    }
+
+    function updateChat(messages) {
+        if (!messages) return;
+        var chatList = document.getElementById('chatList');
+        var needUpdate = chatList.children.length !== messages.length;
+        if (!needUpdate) {
+            for (var i = 0; i < messages.length; i++) {
+                if (chatList.children[i].textContent !== messages[i]) { needUpdate = true; break; }
+            }
+        }
+        if (needUpdate) {
+            var html = '';
+            for (var i = 0; i < messages.length; i++) html += '<li>' + messages[i] + '</li>';
+            chatList.innerHTML = html;
+            document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
+        }
+    }
+
+    document.getElementById('chatForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        var input = document.getElementById('chatInput');
+        var message = input.value.trim();
+        if (!message) return;
+        var formData = new FormData(); formData.append('message', message);
+        try {
+            await fetch('/api/chat/' + roomId + '/' + playerId, { method: 'POST', body: formData });
+            input.value = '';
+            var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);
+            var data = await res.json();
+            updateChat(data.chatMessages);
+        } catch (err) { console.error(err); }
+    });
+
+    // 初始化：恢复规则弹窗并启动定时刷新
+    restoreRulesPopup();
+    fetchState();
+    setInterval(fetchState, 2000);
+</script>
+</body>
+</html>
