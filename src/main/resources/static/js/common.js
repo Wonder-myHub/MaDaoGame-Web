@@ -94,7 +94,10 @@ function updatePlayers(players) {
         var currentClass = isMe ? ' current' : '';
 
         html += '<div class="player-card' + currentClass + deadClass + '">';
-        html += '<p><strong>' + escapeHtml(p.name) + '</strong>' + (isMe ? '（我）' : '') + '</p>';
+        html += '<p><strong>' + escapeHtml(p.name) + '</strong>'
+             + (isMe ? '（我）' : '')
+             + (p.online === false ? '<span class="disconnected">(断线)</span>' : '')
+             + '</p>';
         html += '<p>🐴 ' + (p.horse ? '有' : '无') + '</p>';
         html += '<p>🔪 ' + (p.knife ? '有' : '无') + '</p>';
         html += '<p>❤️ ' + (p.hp > 0 ? p.hp : 0) + '</p>';

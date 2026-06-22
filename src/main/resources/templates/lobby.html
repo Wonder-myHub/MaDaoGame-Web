@@ -149,7 +149,10 @@
             var listHtml = '';
             for (var i = 0; i < data.players.length; i++) {
                 var p = data.players[i];
-                listHtml += '<li>' + escapeHtml(p.name) + (p.id === playerId ? '（我）' : '') + '</li>';
+                listHtml += '<li>' + escapeHtml(p.name)
+                         + (p.id === playerId ? '（我）' : '')
+                         + (p.online === false ? '<span class="disconnected">(断线)</span>' : '')
+                         + '</li>';
             }
             document.getElementById('playersList').innerHTML = listHtml;
             restoreRulesPopup();
@@ -158,7 +161,7 @@
 
     pollState();
     restoreRulesPopup();
-    setInterval(pollState, 3000);
+    setInterval(pollState, 2000);
 </script>
 </body>
 </html>

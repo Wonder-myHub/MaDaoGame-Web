@@ -256,7 +256,7 @@ public class GameService {
      * @param player 待判定的玩家（需从DB加载，确保 lastActivity 最新）
      * @return true=在线（5秒内有活动）
      */
-    private boolean isPlayerOnline(Player player) {
+    public boolean isPlayerOnline(Player player) {
         Timestamp last = player.getLastActivity();
         if (last == null) return false;                      // 从未活动过
         if (last.getTime() == 0) return false;               // 主动退出标记
@@ -817,9 +817,10 @@ public class GameService {
      * </ul>
      * </p>
      */
-    @Scheduled(fixedRate = 60000)                            // Spring定时任务：每60秒执行
+    @Scheduled(fixedRate = 5000)                             // Spring定时任务：每5秒执行
     public void cleanupInactiveRooms() {
         long inactiveThreshold = System.currentTimeMillis() - 2 * 60 * 1000; // 2分钟前
+        long disconnectThreshold = 5 * 1000;                 // 断线阈值：5秒无活动
         List<String> toRemove = new ArrayList<>();
         for (Map.Entry<String, GameRoom> entry : rooms.entrySet()) {
             GameRoom room = entry.getValue();
@@ -831,6 +832,26 @@ public class GameService {
             // 已结束 或 全部不活跃 → 标记清理
             if (("FINISHED".equals(room.getStatus()) || allInactive) && allInactive) {
                 toRemove.add(entry.getKey());
+            }
+
+            // ---- 单个玩家断线检测（仅在游戏进行中） ----
+            if ("PLAYING".equals(room.getStatus())) {
+                for (Player p : room.getPlayers()) {
+                    Timestamp last = p.getLastActivity();
+                    if (last == null || last.getTime() == 0) continue; // 跳过从未活动或已主动退出
+                    long idle = System.currentTimeMillis() - last.getTime();
+                    if (idle > disconnectThreshold) {
+                        // 玩家断线，但尚未记录过 → 写入日志
+                        if (!room.getDisconnectedLogged().contains(p.getId())) {
+                            room.addLog(p.getName() + " 异常断开");
+                            logToConsole(p.getName() + " 异常断开");
+                            room.getDisconnectedLogged().add(p.getId());
+                        }
+                    } else {
+                        // 玩家恢复在线 → 清除断线标记，允许下次断线时重新记录
+                        room.getDisconnectedLogged().remove(p.getId());
+                    }
+                }
             }
         }
         for (String rid : toRemove) {                        // 批量清理

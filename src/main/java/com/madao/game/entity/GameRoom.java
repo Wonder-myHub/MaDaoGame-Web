@@ -67,6 +67,9 @@ public class GameRoom {
     /** 聊天消息列表，最多保留50条（CopyOnWriteArrayList 保证并发读安全） */
     private List<String> chatMessages = new CopyOnWriteArrayList<>();
 
+    /** 已记录断线日志的玩家ID集合，用于去重（避免定时任务重复写入断线日志） */
+    private Set<String> disconnectedLogged = new HashSet<>();
+
     // ==================================================================================
     //  日志管理
     // ==================================================================================
@@ -223,4 +226,8 @@ public class GameRoom {
 
     public int getCurrentActionIndex() { return currentActionIndex; }
     public void setCurrentActionIndex(int currentActionIndex) { this.currentActionIndex = currentActionIndex; }
+
+    /** @return 已记录断线日志的玩家ID集合 */
+    public Set<String> getDisconnectedLogged() { return disconnectedLogged; }
+    public void setDisconnectedLogged(Set<String> disconnectedLogged) { this.disconnectedLogged = disconnectedLogged; }
 }

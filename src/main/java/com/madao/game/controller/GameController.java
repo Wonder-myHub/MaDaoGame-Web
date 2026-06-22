@@ -363,6 +363,7 @@ public class GameController {
             pm.put("location", p.getLocation());
             pm.put("alive", p.isAlive());
             pm.put("guess", p.getGuess());                 // 猜拳手势（他人不可见，为null）
+            pm.put("online", gameService.isPlayerOnline(p)); // 是否在线（用于前端断线标记）
             return pm;
         }).collect(Collectors.toList());
         result.put("players", playersJson);

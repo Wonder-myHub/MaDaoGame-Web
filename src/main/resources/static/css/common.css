@@ -103,3 +103,14 @@ body.dark-theme .chat-box h4 {
     border-radius: 10px 10px 0 0;
 }
 body.dark-theme .chat-scroll ul { color: #ccc; }
+
+/* ===== 断线标记 ===== */
+.disconnected {
+    color: #e74c3c;
+    font-size: 12px;
+    margin-left: 4px;
+    font-weight: bold;
+}
+body.dark-theme .disconnected {
+    color: #ff6b6b;
+}
