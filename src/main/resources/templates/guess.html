@@ -43,6 +43,7 @@
 <!-- ========== 猜拳操作区 ========== -->
 <!-- 初始显示，已出拳后隐藏 -->
 <div id="guessArea">
+    <h3>第 <span id="roundNumber" th:text="${room.round}">1</span> 回合</h3>
     <h2>请出拳：</h2>
     <div class="gesture-form">
         <!--
@@ -116,6 +117,10 @@
             if (!data.currentPlayerAlive) { window.location.href = '/game/' + roomId + '/' + playerId; return; }
 
             if (data.phase === 'GUESS') {
+                // 随轮询更新回合数
+                if (data.round) {
+                    document.getElementById('roundNumber').textContent = data.round;
+                }
                 if (data.currentPlayerGuess == null) {
                     document.getElementById('guessArea').style.display = 'block';
                     document.getElementById('waitMessage').style.display = 'none';

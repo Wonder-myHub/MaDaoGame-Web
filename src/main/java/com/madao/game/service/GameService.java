@@ -421,8 +421,9 @@ public class GameService {
                 p.setSteps(0);                               // 步数归零
                 playerDao.update(p);
             });
-            room.addLog("猜拳平局，无人获得步数");
-            logToConsole("猜拳平局，无人获得步数");
+            room.setRound(room.getRound() + 1);              // 平局也算一个回合
+            room.addLog("第 " + room.getRound() + " 回合猜拳平局，无人获得步数");
+            logToConsole("第 " + room.getRound() + " 回合猜拳平局，无人获得步数");
             room.setPhase("GUESS");                          // 重新猜拳
             gameDao.updateStatus(room);
             return;
@@ -459,16 +460,10 @@ public class GameService {
         }
 
         // ---------- 构建行动队列 ----------
+        // 因为 uniqueGestures.size()==2 已保证有败方，suppressedCount≥1，playersWithSteps 不可能为空
         List<Player> playersWithSteps = alive.stream()
                 .filter(p -> p.getSteps() > 0)               // 筛选有步数的玩家
                 .collect(Collectors.toList());
-        if (playersWithSteps.isEmpty()) {
-            room.addLog("本轮无人获得步数");
-            logToConsole("本轮无人获得步数");
-            room.setPhase("GUESS");                          // 无人可行动，重新猜拳
-            gameDao.updateStatus(room);
-            return;
-        }
 
         // 随机打乱有步数玩家的行动顺序，保证公平
         Collections.shuffle(playersWithSteps);
@@ -774,43 +769,32 @@ public class GameService {
     /**
      * 玩家主动离开房间。
      *
-     * <p>将 lastActivity 设为 epoch(0) 作为"主动退出"标记，
-     * 与 timeout（非活跃）区分开，阻止该玩家重连。</p>
-     * <p>离开后检查是否所有人都已离开，如果是则立即清理房间。</p>
+     * <p>从数据库删除玩家记录、从内存玩家列表中移除该玩家，
+     * 彻底清理该玩家的所有痕迹。如果房间内没有其他玩家，则一并清理房间。</p>
      */
     public void playerLeave(String roomId, String playerId) {
         rooms.compute(roomId, (id, room) -> {
             if (room == null) return null;
 
-            Player player = playerDao.findById(playerId);
-            if (player != null) {
-                player.setLastActivity(new Timestamp(0));        // epoch(0) = 主动退出标记
-                playerDao.update(player);
-                // 同步内存中的玩家状态
-                for (Player p : room.getPlayers()) {
-                    if (p.getId().equals(playerId)) {
-                        p.setLastActivity(new Timestamp(0));
-                        break;
-                    }
-                }
-            }
+            // 先查 DB 获取玩家名称（用于日志）
+            Player dbPlayer = playerDao.findById(playerId);
+            String playerName = dbPlayer != null ? dbPlayer.getName() : playerId;
 
-            // 全员离开则清理 → 返回 null 移除房间
-            if (allPlayersLeft(room)) {
+            // 从数据库删除该玩家记录
+            playerDao.deleteById(playerId);
+
+            // 从内存玩家列表中移除
+            room.getPlayers().removeIf(p -> p.getId().equals(playerId));
+
+            room.addLog(playerName + " 离开了房间");
+            logToConsole(playerName + " 离开了房间");
+
+            // 房间为空则清理房间
+            if (room.getPlayers().isEmpty()) {
                 cleanupRoomData(roomId);
                 return null;
             }
             return room;
-        });
-    }
-
-    /**
-     * 检查房间内所有玩家是否都已离开。
-     */
-    private boolean allPlayersLeft(GameRoom room) {
-        return room.getPlayers().stream().allMatch(p -> {
-            Timestamp last = p.getLastActivity();
-            return last != null && last.getTime() < 1000;
         });
     }
 

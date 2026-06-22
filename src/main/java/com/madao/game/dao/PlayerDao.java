@@ -165,4 +165,20 @@ public class PlayerDao {
             throw new RuntimeException("按房间ID删除玩家失败", e);
         }
     }
+
+    /**
+     * 根据玩家ID删除单条玩家记录。
+     * 用于玩家主动离开房间时清除其数据库记录。
+     * @param playerId 玩家UUID
+     */
+    public void deleteById(String playerId) {
+        String sql = "DELETE FROM player WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, playerId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("按玩家ID删除记录失败", e);
+        }
+    }
 }
