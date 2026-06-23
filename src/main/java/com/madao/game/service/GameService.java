@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.sql.Timestamp;
@@ -60,8 +61,9 @@ import java.util.stream.Collectors;
  *
  * <h2>清理策略</h2>
  * <ul>
- *   <li><b>主动离开</b>：lastActivity 设为 0（epoch），全部离开后立即清理</li>
- *   <li><b>定时清理</b>：@Scheduled 每60秒扫描，清理所有玩家2分钟无活动的房间</li>
+ *   <li><b>启动清理</b>：@PostConstruct 启动时清空所有遗留数据，防止重启后数据库残留</li>
+ *   <li><b>主动离开</b>：玩家点击"返回首页"离开房间，全部离开后立即清理</li>
+ *   <li><b>定时清理</b>：@Scheduled 每5秒扫描，清理所有玩家2分钟无活动的房间（含已结束房间）</li>
  *   <li><b>清理内容</b>：player 表 → game_room 表 → 内存缓存，保证级联删除</li>
  * </ul>
  *
@@ -84,6 +86,19 @@ public class GameService {
     /** 房间数据访问对象，读写房间状态/回合/阶段变化 */
     @Autowired
     private GameDao gameDao;
+
+    /**
+     * 启动时清理遗留数据。
+     * <p>服务器重启后，内存缓存（rooms ConcurrentHashMap）会丢失，但 H2 文件数据库中的
+     * player 和 game_room 表数据依然存在。这些数据无法被定时清理任务扫到（因为任务只遍历内存缓存），
+     * 会变成孤儿数据永久残留。因此在每次启动时清空两张表，保证干净的初始状态。</p>
+     */
+    @PostConstruct
+    public void initCleanup() {
+        playerDao.deleteAll();
+        gameDao.deleteAll();
+        System.out.println("启动清理完成：已清除所有遗留的房间和玩家数据");
+    }
 
     // ==================================================================================
     //  房间生命周期管理
@@ -817,10 +832,10 @@ public class GameService {
      *
      * <p>每 5 秒执行一次（{@code fixedRate=5000}），清理条件：
      * <ul>
-     *   <li>房间状态为 FINISHED 或所有玩家 lastActivity 超过 2 分钟未更新</li>
+     *   <li>所有玩家 lastActivity 超过 2 分钟未更新</li>
      * </ul>
-     * 选择 5 秒扫描 + 2 分钟阈值的理由：
-     * 5 秒间隔保证断线检测及时（游戏进行中），2 分钟宽限期避免网络波动误清理。
+     * 注意：FINISHED 房间不会立即清理，而是与普通房间一样走不活跃超时清理，
+     * 给玩家足够时间查看结果。玩家全部离开时才会立即清理房间。
      * </p>
      */
     @Scheduled(fixedRate = 5000)                             // Spring定时任务：每5秒执行
@@ -830,11 +845,6 @@ public class GameService {
         List<String> toRemove = new ArrayList<>();
         for (Map.Entry<String, GameRoom> entry : rooms.entrySet()) {
             GameRoom room = entry.getValue();
-            // FINISHED 房间无条件清理（无需检查玩家活跃状态）
-            if ("FINISHED".equals(room.getStatus())) {
-                toRemove.add(entry.getKey());
-                continue;                                    // 跳过后续不活跃检测和断线检测
-            }
 
             // 检查所有玩家是否都不活跃（从DB读取lastActivity，避免定时任务线程读到过期内存值）
             boolean allInactive = true;
