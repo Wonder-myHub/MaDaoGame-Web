@@ -626,11 +626,12 @@ public class GameService {
                         target5.setHp(target5.getHp() - dmg);
                         dbPlayer.setBuff(false);                 // 消耗buff
                         memPlayer.setBuff(false);
-                        playerDao.update(target5);
                         logMsg = dbPlayer.getName() + " 刺了 " + target5.getName() + "，造成 " + dmg + " 点伤害";
-                        if (target5.getHp() <= 0) {
+                        if (target5.getHp() <= 0) {              // HP归零 → 先设死亡再持久化，保证一致
                             target5.setAlive(false);
-                            playerDao.update(target5);
+                        }
+                        playerDao.update(target5);
+                        if (target5.getHp() <= 0) {
                             room.addLog(target5.getName() + " 被刺死！");
                             logToConsole(target5.getName() + " 被刺死！");
                             checkGameEnd(room);

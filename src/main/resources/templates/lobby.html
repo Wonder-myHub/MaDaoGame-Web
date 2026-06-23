@@ -154,7 +154,7 @@
      * pollState() — AJAX 轮询房间状态
      *
      * API 调用: GET /api/room/{roomId}?playerId={playerId}
-     * 轮询间隔: 每 2 秒（由 setInterval 驱动）
+     * 轮询间隔: 每 3 秒（由 smartPoll(pollState, 3000) 驱动，后台自动暂停）
      *
      * 响应 JSON 结构:
      *   - status:    String  — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
@@ -208,7 +208,7 @@
 
     pollState();
     restoreRulesPopup();
-    setInterval(pollState, 2000);
+    smartPoll(pollState, 3000);
 </script>
 </body>
 </html>

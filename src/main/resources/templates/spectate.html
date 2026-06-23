@@ -24,7 +24,7 @@
 
   【前端行为总览】
   - 页面加载时调用 fetchState() 获取游戏状态
-  - setInterval(fetchState, 2000) 每2秒轮询一次
+  - smartPoll(fetchState, 4000) 每4秒轮询（后台自动暂停）
   - 仅更新展示数据（players/actionLogs/chatMessages），不参与游戏操作
   - 游戏结束 (status=='FINISHED') 时自动跳转到结果页 /game/{roomId}/{playerId}
   - 房间不存在时跳转到首页 /
@@ -182,7 +182,7 @@
     initChatForm();
     restoreRulesPopup();
     fetchState();
-    setInterval(fetchState, 2000);
+    smartPoll(fetchState, 4000);
 </script>
 </body>
 </html>

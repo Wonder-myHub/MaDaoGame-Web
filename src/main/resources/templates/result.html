@@ -28,7 +28,7 @@
   【前端行为总览】
   - 页面加载时触发 createConfetti() 创建100片纸屑动画
   - 调用 fetchState() 获取最终游戏状态
-  - setInterval(fetchState, 2000) 每2秒轮询
+  - smartPoll(fetchState, 5000) 每5秒轮询（后台自动暂停）
   - 读取 data.winner 更新胜利者名称
   - 读取 data.players 渲染最终玩家状态
   - 房间不存在时跳转到首页 /
@@ -240,7 +240,7 @@
     restoreRulesPopup();
     fetchState();
     // 游戏结束后仍保持每2秒轮询：用于实时更新最终状态、操作记录、聊天消息，以及检测胜利者名称变化
-    setInterval(fetchState, 2000);
+    smartPoll(fetchState, 5000);
 </script>
 </body>
 </html>

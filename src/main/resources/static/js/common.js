@@ -229,3 +229,35 @@ function initChatForm() {
         }
     });
 }
+
+// ========== 智能轮询（页面隐藏时自动暂停） ==========
+
+/**
+ * smartPoll(fn, intervalMs) — 智能定时轮询
+ *
+ * 相比 setInterval 的改进：
+ *   1. 当页面不可见（切到后台标签页）时自动跳过执行，减少服务器压力
+ *   2. 首次立即执行 fn()，无需等待第一个间隔
+ *   3. 返回 { stop } 对象以便手动停止
+ *
+ * @param {function} fn          — 轮询回调函数
+ * @param {number}   intervalMs  — 轮询间隔（毫秒）
+ * @returns {{ stop: function }} — 包含 stop 方法，调用可停止轮询
+ */
+function smartPoll(fn, intervalMs) {
+    var timer;
+    function schedule() {
+        timer = setTimeout(function() {
+            // 页面不可见时跳过本次执行，等下一轮
+            if (document.hidden) {
+                schedule();
+                return;
+            }
+            fn();
+            schedule();
+        }, intervalMs);
+    }
+    schedule();
+    fn(); // 首次立即执行
+    return { stop: function() { clearTimeout(timer); } };
+}

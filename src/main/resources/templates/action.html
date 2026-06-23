@@ -27,7 +27,7 @@
 
   【前端行为总览】
   - 页面加载时调用 fetchState() 获取游戏状态
-  - setInterval(fetchState, 2000) 每2秒轮询一次
+  - smartPoll(fetchState, 2000) 每2秒轮询（后台自动暂停）
   - 根据 isCurrentActionPlayer 和 currentPlayerSteps 决定显示行动UI或等待UI
   - 行动类型编码(actionType) 0-7:
     0=放弃  1=移动  2=买马  3=买刀  4=踢  5=刺  6=血祭  7=撵进去
@@ -638,7 +638,7 @@
     initChatForm();
     restoreRulesPopup();
     fetchState();
-    setInterval(fetchState, 2000);
+    smartPoll(fetchState, 2000);
 </script>
 </body>
 </html>

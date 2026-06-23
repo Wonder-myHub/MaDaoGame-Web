@@ -199,7 +199,7 @@
     // ===== 定时刷新 =====
     restoreRulesPopup();
     fetchState();
-    setInterval(fetchState, 2000);
+    smartPoll(fetchState, 2000);
 </script>
 </body>
 </html>

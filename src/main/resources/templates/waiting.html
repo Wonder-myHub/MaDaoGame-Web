@@ -136,7 +136,7 @@
      * fetchState() — 异步获取游戏状态并自动跳转（核心轮询函数）
      *
      * API 调用: GET /api/room/{roomId}?playerId={playerId}
-     * 轮询间隔: 每 2 秒（由 setInterval(fetchState, 2000) 驱动）
+     * 轮询间隔: 每 3 秒（由 smartPoll(fetchState, 3000) 驱动，后台自动暂停）
      *
      * 响应 JSON 数据结构:
      *   - status:                String   — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
@@ -207,7 +207,7 @@
     initChatForm();
     restoreRulesPopup();
     fetchState();
-    setInterval(fetchState, 2000);
+    smartPoll(fetchState, 3000);
 </script>
 </body>
 </html>
