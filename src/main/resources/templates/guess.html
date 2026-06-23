@@ -176,6 +176,7 @@
     }
 
     // ===== 猜拳提交 =====
+    var submitting = false;
     var gestureButtons = document.querySelectorAll('.gesture-form button');
     // ===== 为每个猜拳按钮绑定点击事件 =====
     // 回调参数 btn: HTMLButtonElement — 被点击的按钮元素
@@ -183,6 +184,9 @@
     // 点击后通过 FormData 将 gesture 提交到 POST /api/guess/{roomId}/{playerId}
     gestureButtons.forEach(function(btn) {
         btn.addEventListener('click', async function() {
+            if (submitting) return;                          // 防重复点击
+            submitting = true;
+            gestureButtons.forEach(function(b) { b.disabled = true; }); // 禁用所有猜拳按钮
             var gesture = this.getAttribute('data-gesture');
             var formData = new FormData();
             formData.append('gesture', gesture);
@@ -190,6 +194,10 @@
                 await fetch('/api/guess/' + roomId + '/' + playerId, { method: 'POST', body: formData });
                 fetchState();
             } catch (e) { console.error('猜拳提交失败', e); }
+            finally {
+                submitting = false;
+                gestureButtons.forEach(function(b) { b.disabled = false; }); // 恢复按钮
+            }
         });
     });
 

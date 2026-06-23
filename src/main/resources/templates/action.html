@@ -237,6 +237,7 @@
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
     var currentData = null;
+    var lastActionData = null;    // 缓存上次 showActionUI 的数据，用于比较避免无意义 DOM 重建
     var pendingAction = { type: null, targetId: '', city: '' };
 
     // ========== 游戏逻辑 ==========
@@ -360,6 +361,19 @@
     function showActionUI(data) {
         document.getElementById('actionArea').style.display = 'block';
         document.getElementById('waitMessage').style.display = 'none';
+
+        // 序列化当前轮询数据用于与上次比较
+        var actionKey = JSON.stringify(data.availableActions || []);
+        var targetsKey = JSON.stringify(data.targets || []);
+        var citiesKey = JSON.stringify(data.cities || []);
+        var currentKey = actionKey + '|' + targetsKey + '|' + citiesKey;
+
+        // 数据无变化 → 跳过 DOM 重建，只恢复暂存的选择状态
+        if (lastActionData === currentKey) {
+            restorePendingAction(data);
+            return;
+        }
+        lastActionData = currentKey;
 
         // 生成行动按钮
         var buttonsContainer = document.getElementById('actionButtons');

@@ -69,8 +69,15 @@ public class Player {
 
     /** @return 当前 HP */
     public int getHp() { return hp; }
-    /** 设置HP时自动钳制到不小于0，避免出现负数生命值 */
-    public void setHp(int hp) { this.hp = Math.max(hp, 0); }
+    /**
+     * 设置HP时自动钳制到不小于0，避免出现负数生命值。
+     * <p>当 HP 变为 0 时，自动将 alive 置为 false，确保两者在同一原子操作内同步，
+     * 消除 hp=0 但 alive=true 的不一致窗口。</p>
+     */
+    public void setHp(int hp) {
+        this.hp = Math.max(hp, 0);
+        if (this.hp <= 0) this.alive = false;
+    }
 
     /** @return 当前步数（行动点） */
     public int getSteps() { return steps; }

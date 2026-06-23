@@ -346,12 +346,17 @@ public class GameService {
      * @param gesture  手势："石头" / "剪刀" / "布"
      */
     public void submitGuess(String playerId, String gesture) {
-        Player player = playerDao.findById(playerId);
-        if (player == null || !player.isAlive()) return;     // 无效玩家或已死亡，忽略
+        // 先查一次获取 roomId（仅用于定位 compute 的 key）
+        Player playerCheck = playerDao.findById(playerId);
+        if (playerCheck == null || !playerCheck.isAlive()) return;
+        String roomId = playerCheck.getRoomId();
 
-        String roomId = player.getRoomId();
         rooms.compute(roomId, (id, room) -> {
             if (room == null) return null;
+
+            // 在 compute 闭包内重新从 DB 加载最新 Player，避免外部引用被并发覆盖
+            Player player = playerDao.findById(playerId);
+            if (player == null || !player.isAlive()) return room;
 
             // 先更新数据库
             player.setGuess(gesture);
@@ -594,14 +599,13 @@ public class GameService {
                     Player target4 = findTargetInSameLocation(dbPlayer, room, targetId); // 查找同城目标
                     if (target4 != null) {
                         int dmg = memPlayer.isBuff() ? 6 : 3;    // buff翻倍伤害
-                        target4.setHp(target4.getHp() - dmg);
+                        target4.setHp(target4.getHp() - dmg);    // setHp 自动同步 alive 状态
                         target4.setLocation("outside");          // 目标被踢到城外
                         dbPlayer.setBuff(false);                 // 消耗buff
                         memPlayer.setBuff(false);
                         playerDao.update(target4);               // 先持久化目标状态
                         logMsg = dbPlayer.getName() + " 踢了 " + target4.getName() + "，造成 " + dmg + " 点伤害";
                         if (target4.getHp() <= 0) {              // HP归零 → 死亡
-                            target4.setAlive(false);
                             playerDao.update(target4);
                             room.addLog(target4.getName() + " 被踢出局！");
                             logToConsole(target4.getName() + " 被踢出局！");
@@ -623,13 +627,10 @@ public class GameService {
                     Player target5 = findTargetInSameLocation(dbPlayer, room, targetId);
                     if (target5 != null) {
                         int dmg = memPlayer.isBuff() ? 2 : 1;    // buff翻倍伤害
-                        target5.setHp(target5.getHp() - dmg);
+                        target5.setHp(target5.getHp() - dmg);    // setHp 自动同步 alive 状态
                         dbPlayer.setBuff(false);                 // 消耗buff
                         memPlayer.setBuff(false);
                         logMsg = dbPlayer.getName() + " 刺了 " + target5.getName() + "，造成 " + dmg + " 点伤害";
-                        if (target5.getHp() <= 0) {              // HP归零 → 先设死亡再持久化，保证一致
-                            target5.setAlive(false);
-                        }
                         playerDao.update(target5);
                         if (target5.getHp() <= 0) {
                             room.addLog(target5.getName() + " 被刺死！");
@@ -829,26 +830,36 @@ public class GameService {
         List<String> toRemove = new ArrayList<>();
         for (Map.Entry<String, GameRoom> entry : rooms.entrySet()) {
             GameRoom room = entry.getValue();
-            // 检查所有玩家是否都不活跃
-            boolean allInactive = room.getPlayers().stream().allMatch(p -> {
-                Timestamp last = p.getLastActivity();
-                return last == null || last.getTime() < inactiveThreshold;
-            });
-            // 已结束 或 全部不活跃 → 标记清理
-            if (("FINISHED".equals(room.getStatus()) || allInactive) && allInactive) {
+            // FINISHED 房间无条件清理（无需检查玩家活跃状态）
+            if ("FINISHED".equals(room.getStatus())) {
+                toRemove.add(entry.getKey());
+                continue;                                    // 跳过后续不活跃检测和断线检测
+            }
+
+            // 检查所有玩家是否都不活跃（从DB读取lastActivity，避免定时任务线程读到过期内存值）
+            boolean allInactive = true;
+            for (Player p : room.getPlayers()) {
+                Player dbPlayer = playerDao.findById(p.getId());
+                if (dbPlayer == null) continue;
+                Timestamp last = dbPlayer.getLastActivity();
+                if (last != null && last.getTime() > inactiveThreshold) {
+                    allInactive = false;
+                    break;
+                }
+            }
+            if (allInactive) {
                 toRemove.add(entry.getKey());
             }
 
-            // ---- 单个玩家断线检测（仅在游戏进行中） ----
+            // ---- 单个玩家断线检测（仅在游戏进行中，从DB读取最新lastActivity） ----
             if ("PLAYING".equals(room.getStatus())) {
                 for (Player p : room.getPlayers()) {
-                    Timestamp last = p.getLastActivity();
+                    Player dbPlayer = playerDao.findById(p.getId());
+                    if (dbPlayer == null) continue;
+                    Timestamp last = dbPlayer.getLastActivity();
                     if (last == null || last.getTime() == 0) continue; // 跳过从未活动或已主动退出
                     long idle = System.currentTimeMillis() - last.getTime();
                     if (idle > disconnectThreshold) {
-                        // 玩家断线，但尚未记录过 → 写入日志
-                        // 注意：contains + add 非原子操作，但在 ConcurrentHashMap
-                        // compute 回调内串行执行，且 rooms.entrySet() 迭代时不会并发修改自身，安全
                         if (!room.getDisconnectedLogged().contains(p.getId())) {
                             room.addLog(p.getName() + " 异常断开");
                             logToConsole(p.getName() + " 异常断开");

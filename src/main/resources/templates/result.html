@@ -221,20 +221,11 @@
 
     window.addEventListener('load', createConfetti);
 
-    async function fetchState() {
-        try {
-            var url = '/api/room/' + roomId + '?playerId=' + playerId;
-            var res = await fetch(url);
-            if (!res.ok) return;
-            var data = await res.json();
-            if (!data.status) { window.location.href = '/'; return; }
+    var fetchState = createRoomPoller({
+        onUpdate: function(data) {
             if (data.winner) { document.getElementById('winnerName').textContent = '胜利者：' + escapeHtml(data.winner); }
-            updatePlayers(data.players);
-            updateLogs(data.actionLogs);
-            updateChat(data.chatMessages);
-            restoreRulesPopup();
-        } catch (e) { console.error(e); }
-    }
+        }
+    });
 
     initChatForm();
     restoreRulesPopup();

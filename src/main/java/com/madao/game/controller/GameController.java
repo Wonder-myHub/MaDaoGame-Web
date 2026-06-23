@@ -96,9 +96,14 @@ public class GameController {
             model.addAttribute("error", "玩家数量至少为2人");
             return "index";                                  // 校验失败，回首页
         }
+        String trimmedName = name.trim();
+        if (trimmedName.isEmpty() || trimmedName.length() > 20) {
+            model.addAttribute("error", "昵称长度需在1-20个字符之间");
+            return "index";
+        }
         try {
             String roomId = gameService.createRoom(count);   // 创建房间
-            String playerId = gameService.joinRoom(roomId, name.trim()); // 房主自动加入
+            String playerId = gameService.joinRoom(roomId, trimmedName); // 房主自动加入
             return "redirect:/lobby/" + roomId + "/" + playerId; // 跳转大厅
         } catch (RuntimeException e) {
             model.addAttribute("error", "创建失败：" + e.getMessage());
@@ -112,8 +117,13 @@ public class GameController {
      */
     @PostMapping("/join")
     public String join(@RequestParam String roomId, @RequestParam String name, Model model) {
+        String trimmedName = name.trim();
+        if (trimmedName.isEmpty() || trimmedName.length() > 20) {
+            model.addAttribute("error", "昵称长度需在1-20个字符之间");
+            return "index";
+        }
         try {
-            String playerId = gameService.joinRoom(roomId.trim(), name.trim());
+            String playerId = gameService.joinRoom(roomId.trim(), trimmedName);
             GameRoom room = gameService.getRoom(roomId.trim());
             if (room != null && ("PLAYING".equals(room.getStatus()) || "FINISHED".equals(room.getStatus()))) {
                 return "redirect:/game/" + roomId.trim() + "/" + playerId;  // 已在游戏中
@@ -294,7 +304,9 @@ public class GameController {
         if (player != null && message != null && !message.trim().isEmpty()) {
             GameRoom room = gameService.getRoom(roomId);
             if (room != null) {
-                room.addChatMessage(player.getName() + "：" + message.trim());
+                String msg = message.trim();
+                if (msg.length() > 500) msg = msg.substring(0, 500); // 截断超长消息
+                room.addChatMessage(player.getName() + "：" + msg);
             }
         }
         return "redirect:/game/" + roomId + "/" + playerId;
@@ -371,7 +383,15 @@ public class GameController {
             pm.put("guess", p.getGuess());                 // 猜拳手势；注意：此实现直接暴露所有玩家的 guess 值到前端；
                                                             // 若需保密（他人可见为 null），应在此处添加 requestPlayer 身份判断：
                                                             // p.getId().equals(playerId) ? p.getGuess() : null
-            pm.put("online", gameService.isPlayerOnline(p)); // 是否在线（用于前端断线标记）
+            // 在线判定：请求者自己刚发心跳肯定在线；其他玩家从DB读最新lastActivity避免过期内存误判
+            boolean online;
+            if (p.getId().equals(playerId)) {
+                online = true;
+            } else {
+                Player dbPlayer = playerDao.findById(p.getId());
+                online = dbPlayer != null && gameService.isPlayerOnline(dbPlayer);
+            }
+            pm.put("online", online);
             return pm;
         }).collect(Collectors.toList());
         result.put("players", playersJson);
@@ -474,7 +494,9 @@ public class GameController {
         if (player != null && message != null && !message.trim().isEmpty()) {
             GameRoom room = gameService.getRoom(roomId);
             if (room != null) {
-                room.addChatMessage(player.getName() + "：" + message.trim());
+                String msg = message.trim();
+                if (msg.length() > 500) msg = msg.substring(0, 500); // 截断超长消息
+                room.addChatMessage(player.getName() + "：" + msg);
             }
         }
         GameRoom room = gameService.getRoom(roomId);

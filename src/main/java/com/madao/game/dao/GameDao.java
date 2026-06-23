@@ -102,4 +102,20 @@ public class GameDao {
             throw new RuntimeException("删除房间记录失败", e);
         }
     }
+
+    /**
+     * 删除 game_room 表中的所有记录。
+     * 用于服务器重启时清理遗留的孤儿数据（因为 rooms 是内存结构，重启后丢失）。
+     * 注意：需确保 player 表先被清理以避免外键约束冲突。
+     */
+    public void deleteAll() {
+        String sql = "DELETE FROM game_room";
+        try (Connection conn = DBUtil.getConnection();
+             Statement stmt = conn.createStatement()) {
+            int deleted = stmt.executeUpdate(sql);
+            System.out.println("已清理 game_room 表: " + deleted + " 条记录");
+        } catch (SQLException e) {
+            throw new RuntimeException("清空房间表失败", e);
+        }
+    }
 }

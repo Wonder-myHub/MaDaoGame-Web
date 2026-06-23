@@ -1,6 +1,7 @@
 package com.madao.game.entity;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -51,7 +52,7 @@ public class GameRoom {
     private List<Player> players = new CopyOnWriteArrayList<>();
 
     /** 行动队列：本回合有步数的玩家ID列表，已随机打乱顺序 */
-    private List<String> actionQueue = new ArrayList<>();
+    private List<String> actionQueue = Collections.synchronizedList(new ArrayList<>());
 
     /** 行动队列当前指针：指向正在行动的玩家在 actionQueue 中的索引 */
     private int currentActionIndex = 0;
@@ -63,7 +64,7 @@ public class GameRoom {
     private List<String> chatMessages = new CopyOnWriteArrayList<>();
 
     /** 已记录断线日志的玩家ID集合，用于去重（避免定时任务重复写入断线日志） */
-    private Set<String> disconnectedLogged = new HashSet<>();
+    private Set<String> disconnectedLogged = ConcurrentHashMap.newKeySet();
 
     // ==================================================================================
     //  日志管理

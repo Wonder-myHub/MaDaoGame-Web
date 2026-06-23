@@ -158,26 +158,11 @@
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
 
-    async function fetchState() {
-        try {
-            // 构建轮询 URL: GET /api/room/{roomId}?playerId={playerId}
-            var url = '/api/room/' + roomId + '?playerId=' + playerId;
-            var res = await fetch(url);
-            if (!res.ok) return;
-            var data = await res.json();
-            // 房间不存在 → 跳转首页/
-            if (!data.status) { window.location.href = '/'; return; }
-
-            // 更新三个只读面板：玩家状态、操作日志、聊天消息（观战者不参与交互）
-            updatePlayers(data.players);
-            updateLogs(data.actionLogs);
-            updateChat(data.chatMessages);
-
-            // 游戏结束 → 跳转结果页（观战者同样可以查看最终结果）
-            if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; }
-            restoreRulesPopup();
-        } catch (e) { console.error('状态刷新失败', e); }
-    }
+    var fetchState = createRoomPoller({
+        shouldRedirect: function(data) {
+            return data.status === 'FINISHED';
+        }
+    });
 
     initChatForm();
     restoreRulesPopup();

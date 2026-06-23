@@ -181,4 +181,19 @@ public class PlayerDao {
             throw new RuntimeException("按玩家ID删除记录失败", e);
         }
     }
+
+    /**
+     * 删除 player 表中的所有记录。
+     * 用于服务器重启时清理遗留的孤儿数据（因为 rooms 是内存结构，重启后丢失）。
+     */
+    public void deleteAll() {
+        String sql = "DELETE FROM player";
+        try (Connection conn = DBUtil.getConnection();
+             Statement stmt = conn.createStatement()) {
+            int deleted = stmt.executeUpdate(sql);
+            System.out.println("已清理 player 表: " + deleted + " 条记录");
+        } catch (SQLException e) {
+            throw new RuntimeException("清空玩家表失败", e);
+        }
+    }
 }

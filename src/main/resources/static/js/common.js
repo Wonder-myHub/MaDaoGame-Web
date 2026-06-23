@@ -237,8 +237,9 @@ function initChatForm() {
  *
  * 相比 setInterval 的改进：
  *   1. 当页面不可见（切到后台标签页）时跳过 UI 刷新（fn），但持续发送心跳保持在线
- *   2. 首次立即执行 fn()，无需等待第一个间隔
- *   3. 返回 { stop } 对象以便手动停止
+ *   2. 页面从隐藏恢复可见时立即执行 fn()，无需等待轮询间隔到期
+ *   3. 首次立即执行 fn()，无需等待第一个间隔
+ *   4. 返回 { stop } 对象以便手动停止
  *
  * @param {function} fn          — 轮询回调函数
  * @param {number}   intervalMs  — 轮询间隔（毫秒）
@@ -260,7 +261,65 @@ function smartPoll(fn, intervalMs) {
             schedule();
         }, intervalMs);
     }
+
+    // 页面从隐藏恢复可见时立即刷新，无需等待 setTimeout 到期
+    function onVisibilityChange() {
+        if (!document.hidden) fn();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     schedule();
     fn(); // 首次立即执行
-    return { stop: function() { clearTimeout(timer); } };
+    return {
+        stop: function() {
+            clearTimeout(timer);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        }
+    };
+}
+
+// ========== 通用房间轮询工厂函数 ==========
+
+/**
+ * createRoomPoller(config) — 创建适配不同页面的房间轮询函数
+ *
+ * 提取 waiting/spectate/result 三个页面中重复的 fetchState 模式：
+ *   1. GET /api/room/{roomId}?playerId={playerId}
+ *   2. 检查 room 是否存在 → 不存在跳首页
+ *   3. 更新 UI（players/logs/chat）
+ *   4. 根据状态/阶段判断是否跳转
+ *
+ * @param {Object} config — 配置对象
+ *   config.shouldRedirect(data)   — 返回 true 则跳转到 /game/{roomId}/{playerId}
+ *   config.onUpdate(data)         — 自定义 UI 更新回调（在通用更新之后调用）
+ *   config.intervalMs             — 轮询间隔（毫秒），默认 3000
+ * @returns {Function} — 返回 fetchState 函数，调用方自行启动轮询
+ */
+function createRoomPoller(config) {
+    config = config || {};
+    return async function fetchState() {
+        try {
+            var url = '/api/room/' + roomId + '?playerId=' + playerId;
+            var res = await fetch(url);
+            if (!res.ok) return;
+            var data = await res.json();
+            if (!data.status) { window.location.href = '/'; return; }
+
+            // 通用 UI 更新
+            updatePlayers(data.players);
+            updateLogs(data.actionLogs);
+            updateChat(data.chatMessages);
+
+            // 页面特定的跳转逻辑
+            if (config.shouldRedirect && config.shouldRedirect(data)) {
+                window.location.href = '/game/' + roomId + '/' + playerId;
+                return;
+            }
+
+            // 页面特定的 UI 更新
+            if (config.onUpdate) config.onUpdate(data);
+
+            restoreRulesPopup();
+        } catch (e) { console.error('状态刷新失败', e); }
+    };
 }
