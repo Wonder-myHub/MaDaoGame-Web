@@ -1,0 +1,241 @@
+@startuml MaDaoGame-Web UML 类图
+' ============================================================
+' MaDaoGame-Web 完整 UML 类图
+' 生成工具：PlantUML + Java
+' ============================================================
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 10
+skinparam classFontSize 11
+skinparam classHeaderFontSize 12
+skinparam dpi 150
+
+skinparam class {
+    BorderColor #333333
+    BorderThickness 1.5
+    BackgroundColor #FAFAFA
+    HeaderBackgroundColor #E3F2FD
+    FontColor #222222
+    StereotypeFontSize 9
+}
+
+skinparam package {
+    BorderColor #999999
+    FontSize 12
+    FontStyle bold
+    BackgroundColor #F5F5F5
+}
+
+skinparam note {
+    BackgroundColor #FFFDE7
+    BorderColor #F9A825
+}
+
+' ============================================================
+' 包：com.madao.game
+' ============================================================
+package "com.madao.game" as root_pkg {
+  class MadaoGameApplication <<@SpringBootApplication\n@EnableScheduling>> {
+    {static} + main(String[] args) : void
+  }
+}
+
+' ============================================================
+' 包：com.madao.game.controller
+' ============================================================
+package "com.madao.game.controller" as ctrl_pkg #C8E6C9 {
+  class GameController <<@Controller>> {
+    - gameService : GameService
+    - playerDao : PlayerDao
+    ==
+    + index() : String
+    + create(int count, String name) : String
+    + join(String roomId, String name) : String
+    + lobby(String roomId, String playerId) : String
+    + game(String roomId, String playerId) : String
+    + guess(String roomId, String playerId, String gesture) : String
+    + action(roomId, playerId, int actionType, targetId, city) : String
+    + leave(String roomId, String playerId) : String
+    + chat(String roomId, String playerId, String message) : String
+    + apiGetRoomState(String roomId, String playerId) : Map
+    + apiGuess(roomId, playerId, gesture) : Map
+    + apiAction(roomId, playerId, int actionType, targetId, city) : Map
+    + apiChat(roomId, playerId, message) : List
+    + forceStartGame(String roomId, String playerId) : Map
+    - findPlayerInRoom(GameRoom room, String playerId) : Player
+    - buildAvailableActions(Player p, GameRoom r) : List
+    - createAction(int i, int type, String name) : Map
+    - hasOtherPlayerInSameLocation(Player self, GameRoom r) : boolean
+  }
+}
+
+' ============================================================
+' 包：com.madao.game.service
+' ============================================================
+package "com.madao.game.service" as svc_pkg #FFF9C4 {
+  class GameService <<@Service>> {
+    - {static} log : Logger
+    - rooms : Map~String,GameRoom~
+    - random : Random
+    - playerDao : PlayerDao
+    - gameDao : GameDao
+    ==
+    + createRoom(int playerCount) : String
+    + joinRoom(String roomId, String playerName) : String
+    + isPlayerOnline(Player player) : boolean
+    + forceStartGame(String roomId, String playerId) : void
+    + getRoom(String roomId) : GameRoom
+    + submitGuess(String playerId, String gesture) : void
+    + executeAction(String playerId, int actionType, String targetId, String city) : String
+    + playerLeave(String roomId, String playerId) : void
+    + cleanupInactiveRooms() : void
+    - startGame(GameRoom room) : void
+    - processGuessResult(GameRoom room) : void
+    - findTargetInSameLocation(Player self, GameRoom r, String targetId) : Player
+    - checkGameEnd(GameRoom room) : void
+    - endRound(GameRoom room) : void
+    - cleanupRoomData(String roomId) : void
+    - logToConsole(String msg) : void
+    - getClientIp() : String
+  }
+}
+
+' ============================================================
+' 包：com.madao.game.entity
+' ============================================================
+package "com.madao.game.entity" as entity_pkg #FCE4EC {
+  class GameRoom <<POJO>> {
+    - {static} log : Logger
+    - id : String
+    - playerCount : int
+    - status : String = "WAITING"
+    - round : int = 0
+    - phase : String = "GUESS"
+    - winner : String
+    - players : List~Player~
+    - actionQueue : List~String~
+    - currentActionIndex : int = 0
+    - actionLogs : List~String~
+    - chatMessages : List~String~
+    - disconnectedLogged : Set~String~
+    ==
+    + getAlivePlayers() : List~Player~
+    + isCurrentPlayer(String playerId) : boolean
+    + nextPlayer() : void
+    + getPlayersNotGuessed() : List~String~
+    + getCurrentActionPlayerName() : String
+    + getCurrentActionPlayerSteps() : int
+    + addLog(String log) : void
+    + addLogQuiet(String log) : void
+    + addChatMessage(String msg) : void
+    + <<getter/setter>> ×22
+  }
+
+  class Player <<POJO>> {
+    - id : String
+    - roomId : String
+    - name : String
+    - hp : int = 10
+    - steps : int = 0
+    - horse : boolean = false
+    - knife : boolean = false
+    - buff : boolean = false
+    - location : String
+    - alive : boolean = true
+    - guess : String
+    - lastActivity : Timestamp
+    ==
+    + setHp(int hp) : void
+    + <<getter/setter>> ×22
+  }
+}
+
+' ============================================================
+' 包：com.madao.game.dao
+' ============================================================
+package "com.madao.game.dao" as dao_pkg #E8EAF6 {
+  class GameDao <<@Repository>> {
+    + insert(GameRoom room) : void
+    + findById(String id) : GameRoom
+    + updateStatus(GameRoom room) : void
+    + deleteById(String id) : void
+  }
+
+  class PlayerDao <<@Repository>> {
+    + insert(Player player) : void
+    + findByRoomId(String roomId) : List~Player~
+    + findById(String id) : Player
+    + update(Player player) : void
+    + deleteByRoomId(String roomId) : void
+    + deleteById(String playerId) : void
+  }
+}
+
+' ============================================================
+' 包：com.madao.game.util
+' ============================================================
+package "com.madao.game.util" as util_pkg #F3E5F5 {
+  class DBUtil <<@Component>> {
+    - {static} log : Logger
+    - {static} dataSource : DataSource
+    ==
+    + setDataSource(DataSource ds) : void
+    + init() : void
+    + {static} getConnection() : Connection
+    + {static} close(Connection, Statement, ResultSet) : void
+    - createTablesIfNotExist() : void
+  }
+  note right of DBUtil::setDataSource
+    @Autowired Setter 注入
+    同时赋值给静态字段
+  end note
+}
+
+' ============================================================
+' 关系连线
+' ============================================================
+
+' GameController 依赖 GameService
+GameController ..> GameService : «@Autowired»
+
+' GameController 依赖 PlayerDao（API 直调用）
+GameController ..> PlayerDao : «@Autowired»
+
+' GameService 依赖 GameDao
+GameService ..> GameDao : «@Autowired»
+
+' GameService 依赖 PlayerDao
+GameService ..> PlayerDao : «@Autowired»
+
+' GameService 聚合 GameRoom（ConcurrentHashMap）
+GameService o--> GameRoom : rooms\n(Map~String,GameRoom~)
+
+' GameRoom 组合 Player（CopyOnWriteArrayList）
+GameRoom *--> Player : players\n(List~Player~)
+
+' GameDao 静态调用 DBUtil
+GameDao ..> DBUtil : «static call»
+
+' PlayerDao 静态调用 DBUtil
+PlayerDao ..> DBUtil : «static call»
+
+' MadaoGameApplication 启动关系
+MadaoGameApplication -[hidden]-> GameController : 启动
+
+' ============================================================
+' 图例
+' ============================================================
+legend right
+  |= 图例 |
+  | ..  虚线箭头 | 依赖（@Autowired） |
+  | ◇-- 空菱形 | 聚合（Aggregation） |
+  | ◆-- 实菱形 | 组合（Composition） |
+  | <#C8E6C9> </> | Controller 层 |
+  | <#FFF9C4> </> | Service 层 |
+  | <#E8EAF6> </> | DAO 层 |
+  | <#FCE4EC> </> | Entity 层 |
+  | <#F3E5F5> </> | Util 层 |
+endlegend
+
+@enduml

@@ -5,7 +5,7 @@
 
 /* ===== 规则弹窗样式（浅色主题，适用于 index/lobby/guess/waiting/action） ===== */
 .rules-container {
-    position: fixed; top: 15px; right: 20px; z-index: 1000;
+    position: fixed; top: 15px; right: 20px; z-index: 1000; /* z-index:1000 确保规则按钮浮动在所有页面内容之上，高于普通布局层级 */
 }
 
 .rules-btn {
@@ -15,11 +15,11 @@
 
 .rules-popup {
     display: none; position: absolute; right: 0; top: 100%; margin-top: 5px;
-    width: max-content; max-width: 90vw;
+    width: max-content; max-width: 90vw; /* max-width:90vw 限制弹窗不超过视口宽度90%，防止移动端溢出；同时用 max-content 保证桌面端紧凑显示 */
     max-height: 24em; overflow-y: auto;
     background: #fff; border: 2px solid #3498db;
     border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    padding: 15px; font-size: 13px; line-height: 1.6; color: #333;
+    padding: 15px; font-size: 13px; line-height: 1.6; color: #333; /* font-size:13px 比正文(16px)略小，规则文字密集时保持可读同时节省空间 */
     text-align: left;
     white-space: normal; overflow-wrap: break-word;
 }
@@ -49,68 +49,71 @@ body { font-family: Arial, sans-serif; margin: 20px; }
 .players-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }
 
 /* ===== 玩家卡片（浅色主题） ===== */
-.player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; }
-.player-card.current { border-color: #3498db; background: #eaf4ff; }
-.player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; }
+.player-card { border: 1px solid #ddd; padding: 8px 12px; background: white; min-width: 130px; } /* min-width:130px 确保卡片最小宽度能容纳"玩家名称+（我）+(断线)"组合不换行 */
+.player-card.current { border-color: #3498db; background: #eaf4ff; } /* 当前玩家：蓝色边框(#3498db)+浅蓝背景(#eaf4ff)，视觉突出度最高 */
+.player-card.dead { background: #d3d3d3; color: #888; border-color: #aaa; } /* 死亡玩家：灰底(#d3d3d3)+灰字(#888)，降低视觉权重表示已出局 */
 .player-card p { margin: 3px 0; }
-.blood-buff { color: red; font-weight: bold; }
+.blood-buff { color: red; font-weight: bold; } /* 血祭标记：红色表示危险/高伤害状态，bold 强调 buff 存在 */
 
 /* ===== 操作记录 / 聊天面板公共样式（浅色主题） ===== */
 .log-box { border: 1px solid #ccc; margin-top: 30px; background: #f9f9f9; }
-.log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
-.log-scroll { max-height: 200px; overflow-y: auto; }
+.log-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; } /* sticky 标题：滚动时面板标题固定顶部，方便用户识别当前查看的是哪种数据 */
+.log-scroll { max-height: 200px; overflow-y: auto; } /* max-height:200px —— 操作记录通常更长（每条一行），分配更多垂直空间 */
 .log-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
 .log-scroll li { margin: 3px 0; }
 
 .chat-box { border: 1px solid #ccc; margin-top: 20px; background: #f9f9f9; }
-.chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; }
-.chat-scroll { max-height: 150px; overflow-y: auto; }
+.chat-box h4 { margin: 0; padding: 10px; background: #eee; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #ddd; } /* sticky 标题：与操作记录面板相同的固定顶栏策略 */
+.chat-scroll { max-height: 150px; overflow-y: auto; } /* max-height:150px —— 聊天面板较操作记录少50px，为下方聊天输入框预留更多可见空间 */
 .chat-scroll ul { margin: 0; padding: 10px 20px; list-style-position: inside; }
 .chat-scroll li { margin: 3px 0; }
 .chat-form { padding: 10px; display: flex; gap: 5px; }
 
 /* ===== 暗色主题覆盖（适用于 spectate/result） ===== */
+/* 暗色主题 rgba 透明度视觉层级设计（从外到内逐层递减）：
+ *   外层容器(0.1) -> 中层卡片(0.05) -> 内层标题(0.3 深色反衬)
+ *   当前玩家卡片(0.2) 最高，死亡卡片(0.3 深灰) 最低 */
 body.dark-theme .status-box {
-    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px;
+    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px; /* 外层容器：0.1 透明度，最浅白色背景 */
 }
 body.dark-theme .status-box h4 {
-    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700;
+    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; /* 标题栏：0.3 深色半透明背景反衬金色文字，形成视觉焦点 */
     border-radius: 10px 10px 0 0;
 }
 body.dark-theme .player-card {
     border: 1px solid rgba(255,255,255,0.3); padding: 10px 15px;
-    background: rgba(255,255,255,0.05); min-width: 130px; border-radius: 8px; color: white;
+    background: rgba(255,255,255,0.05); min-width: 130px; border-radius: 8px; color: white; /* 普通卡片：0.05 透明度，几乎透明，弱化非当前玩家 */
 }
-body.dark-theme .player-card.current { border-color: #ffd700; background: rgba(255,215,0,0.2); }
-body.dark-theme .player-card.dead { background: rgba(100,100,100,0.3); color: #aaa; border-color: #666; }
+body.dark-theme .player-card.current { border-color: #ffd700; background: rgba(255,215,0,0.2); } /* 当前玩家卡片：0.2 金色半透明背景，视觉权重最高 */
+body.dark-theme .player-card.dead { background: rgba(100,100,100,0.3); color: #aaa; border-color: #666; } /* 死亡卡片：0.3 深灰半透明，颜色最暗，视觉权重最低 */
 body.dark-theme .player-card p { margin: 4px 0; }
-body.dark-theme .blood-buff { color: #ff4444; font-weight: bold; }
+body.dark-theme .blood-buff { color: #ff4444; font-weight: bold; } /* 暗色主题血祭：亮红(#ff4444)在深色背景上更醒目 */
 
 body.dark-theme .log-box {
-    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px;
+    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px; /* 外层容器：0.1 透明度，最浅白色背景 */
 }
 body.dark-theme .log-box h4 {
-    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700;
+    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; /* 标题栏：0.3 深色半透明背景反衬金色文字，形成视觉焦点 */
     border-radius: 10px 10px 0 0;
 }
 body.dark-theme .log-scroll ul { color: #ccc; }
 
 body.dark-theme .chat-box {
-    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px;
+    border: 1px solid #ffd700; background: rgba(255,255,255,0.1); border-radius: 10px; /* 外层容器：0.1 透明度，最浅白色背景 */
 }
 body.dark-theme .chat-box h4 {
-    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700;
+    background: rgba(0,0,0,0.3); border-bottom: 1px solid #ffd700; color: #ffd700; /* 标题栏：0.3 深色半透明背景反衬金色文字，形成视觉焦点 */
     border-radius: 10px 10px 0 0;
 }
 body.dark-theme .chat-scroll ul { color: #ccc; }
 
 /* ===== 断线标记 ===== */
 .disconnected {
-    color: #e74c3c;
-    font-size: 12px;
+    color: #e74c3c; /* 红色(#e74c3c)：警示色调，表示玩家已断线/离线，需要在面板中立即引起注意 */
+    font-size: 12px; /* 比正文(16px)小25%：断线标记是辅助信息，不应抢占玩家名称的视觉优先级 */
     margin-left: 4px;
-    font-weight: bold;
+    font-weight: bold; /* 加粗以确保小字号下的可读性 */
 }
 body.dark-theme .disconnected {
-    color: #ff6b6b;
+    color: #ff6b6b; /* 暗色主题：用更亮的粉红(#ff6b6b)替代深色主题中的暗红，确保对比度 */
 }

@@ -1,15 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MaDaoGame-Web Maven 项目配置
+  技术栈：Spring Boot 3.4.5 + H2 嵌入式数据库 + Thymeleaf 模板引擎
+  构建命令：mvn clean package（生成可执行 JAR）
+  运行命令：java -jar target/madao-game-1.0.0.jar
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <!-- 项目坐标：com.madao.madao-game，打包为可执行 JAR -->
     <groupId>com.madao</groupId>
     <artifactId>madao-game</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
+    <!-- 继承 Spring Boot 父 POM：统一管理版本号，无需在依赖中重复写 version -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
@@ -18,23 +26,31 @@
     </parent>
 
     <properties>
+        <!-- Java 25 编译目标版本（与 JDK 25.0.3 运行时匹配） -->
         <java.version>25</java.version>
     </properties>
 
     <dependencies>
+        <!-- Spring Web：内嵌 Tomcat + Spring MVC → 提供 HTTP 服务和 REST API -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+
+        <!-- Thymeleaf 模板引擎：服务端渲染 HTML，支持 th:xxx 表达式 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
+
+        <!-- H2 嵌入式数据库：零配置，文件模式持久化到 madao_db.mv.db -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
+
+        <!-- Spring JDBC：自动配置 HikariCP 连接池 + JdbcTemplate 支持 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
@@ -43,6 +59,7 @@
 
     <build>
         <plugins>
+            <!-- Spring Boot Maven Plugin：打包为可执行 uber-JAR（含所有依赖） -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

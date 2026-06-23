@@ -1,8 +1,5 @@
 package com.madao.game.entity;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -31,8 +28,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * @author madao
  */
 public class GameRoom {
-
-    private static final Logger log = LoggerFactory.getLogger(GameRoom.class);
 
     /** 房间唯一标识（UUID），数据库主键 */
     private String id;
@@ -79,12 +74,10 @@ public class GameRoom {
     public void setActionLogs(List<String> actionLogs) { this.actionLogs = actionLogs; }
 
     /**
-     * 添加一条行动日志（同时输出到控制台）。
+     * 添加一条行动日志（仅存入内存，不输出控制台）。
      * 当日志超过30条时，自动删除最旧的一条。
      */
     public void addLog(String log) {
-        System.out.println(log);           // 同步输出到控制台，方便调试
-        GameRoom.log.info(log);            // SLF4J 结构化日志
         actionLogs.add(log);
         if (actionLogs.size() > 30) actionLogs.remove(0); // 只保留最近30条
     }
@@ -194,26 +187,40 @@ public class GameRoom {
     //  Getter / Setter
     // ==================================================================================
 
+    /** @return 房间唯一标识（UUID） */
     public String getId() { return id; }
+    /** @param id 设置房间标识 */
     public void setId(String id) { this.id = id; }
 
+    /** @return 最大玩家数 */
     public int getPlayerCount() { return playerCount; }
+    /** @param playerCount 设置最大玩家数 */
     public void setPlayerCount(int playerCount) { this.playerCount = playerCount; }
 
     /** @return 房间状态：WAITING / PLAYING / FINISHED */
     public String getStatus() { return status; }
+    /** @param status 设置房间状态 */
     public void setStatus(String status) { this.status = status; }
 
+    /** @return 当前回合数 */
     public int getRound() { return round; }
+    /** @param round 设置回合数 */
     public void setRound(int round) { this.round = round; }
 
     /** @return 当前阶段：GUESS / ACTION */
     public String getPhase() { return phase; }
+    /** @param phase 回合阶段 */
     public void setPhase(String phase) { this.phase = phase; }
 
+    /** @return 胜利者名，未产生时为 null */
     public String getWinner() { return winner; }
+    /** @param winner 设置胜利者 */
     public void setWinner(String winner) { this.winner = winner; }
 
+    /**
+     * @return 房间内所有玩家列表（CopyOnWriteArrayList，线程安全）。
+     *         调用方不应直接修改，如需添加/删除请用 Service 层方法。
+     */
     public List<Player> getPlayers() { return players; }
     /** 设置玩家列表时自动包装为 CopyOnWriteArrayList，确保线程安全 */
     public void setPlayers(List<Player> players) {
@@ -221,13 +228,18 @@ public class GameRoom {
                 ? players : new CopyOnWriteArrayList<>(players);
     }
 
+    /** @return 本回合行动队列（玩家ID列表，已随机打乱） */
     public List<String> getActionQueue() { return actionQueue; }
+    /** @param actionQueue 设置行动队列 */
     public void setActionQueue(List<String> actionQueue) { this.actionQueue = actionQueue; }
 
+    /** @return 行动队列当前指针 */
     public int getCurrentActionIndex() { return currentActionIndex; }
+    /** @param currentActionIndex 设置行动队列指针 */
     public void setCurrentActionIndex(int currentActionIndex) { this.currentActionIndex = currentActionIndex; }
 
     /** @return 已记录断线日志的玩家ID集合 */
     public Set<String> getDisconnectedLogged() { return disconnectedLogged; }
+    /** @param disconnectedLogged 设置断线记录集合 */
     public void setDisconnectedLogged(Set<String> disconnectedLogged) { this.disconnectedLogged = disconnectedLogged; }
 }

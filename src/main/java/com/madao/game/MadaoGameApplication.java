@@ -14,7 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <ul>
  *   <li>{@code @SpringBootApplication} — 启用自动配置、组件扫描、配置类</li>
  *   <li>{@code @EnableScheduling} — 启用定时任务支持，
- *       用于 {@code GameService.cleanupInactiveRooms()} 每60秒清理僵尸房间</li>
+ *       用于 {@code GameService.cleanupInactiveRooms()} 每 5 秒扫描清理过期房间（2 分钟无活动）</li>
  * </ul>
  *
  * <h3>启动后访问</h3>

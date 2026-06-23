@@ -32,6 +32,7 @@ import java.sql.*;
 @Component
 public class DBUtil {
 
+    /** SLF4J 日志记录器，用于记录建表、连接异常等事件 */
     private static final Logger log = LoggerFactory.getLogger(DBUtil.class);
 
     /** Spring Boot 自动配置的 HikariCP 数据源（静态引用，供静态方法使用） */

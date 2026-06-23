@@ -11,8 +11,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -75,19 +74,16 @@ import java.util.stream.Collectors;
 @Service
 public class GameService {
 
-    private static final Logger log = LoggerFactory.getLogger(GameService.class);
-
     /** 内存房间缓存，key=房间UUID，使用 ConcurrentHashMap 保证并发读安全 */
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
 
+    /** 玩家数据访问对象，读写玩家 HP/步数/装备/位置等属性变化 */
     @Autowired
     private PlayerDao playerDao;
 
+    /** 房间数据访问对象，读写房间状态/回合/阶段变化 */
     @Autowired
     private GameDao gameDao;
-
-    /** 随机数生成器，用于生成 UUID 和行动队列随机排序 */
-    private final Random random = new Random();
 
     // ==================================================================================
     //  房间生命周期管理
@@ -174,7 +170,9 @@ public class GameService {
                     // 更新在线时间，同步到DB和内存 → 完成重连
                     existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
                     playerDao.update(existingPlayer);
-                    existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                    if (existingPlayerInMemory != null) {
+                        existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                    }
                     room.addLog(playerName + " 重新连接");
                     logToConsole(playerName + " 重新连接");
                     resultRef.set(existingPlayer.getId());
@@ -230,7 +228,9 @@ public class GameService {
                 // 重连：更新在线时间，同步到DB和内存
                 existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
                 playerDao.update(existingPlayer);
-                existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                if (existingPlayerInMemory != null) {
+                    existingPlayerInMemory.setLastActivity(existingPlayer.getLastActivity());
+                }
                 room.addLog(existingPlayer.getName() + " 重新连接");
                 logToConsole(existingPlayer.getName() + " 重新连接");
                 resultRef.set(existingPlayer.getId());
@@ -415,15 +415,18 @@ public class GameService {
         // ---------- 去重统计：判断是否为有效对决 ----------
         Set<String> uniqueGestures = new HashSet<>(choices.values());
         if (uniqueGestures.size() != 2) {
-            // 所有玩家出相同手势（=1种）或三种手势都有（=3种）→ 平局
+            // 平局判定：size=1 表示全部相同手势，size=3 表示三种手势各有一人
+            // 两种情况均视为平局，不分配步数
             alive.forEach(p -> {
                 p.setGuess(null);                            // 清除出拳记录
                 p.setSteps(0);                               // 步数归零
                 playerDao.update(p);
             });
             room.setRound(room.getRound() + 1);              // 平局也算一个回合
-            room.addLog("第 " + room.getRound() + " 回合猜拳平局，无人获得步数");
-            logToConsole("第 " + room.getRound() + " 回合猜拳平局，无人获得步数");
+            room.addLog("第 " + (room.getRound() - 1) + " 回合猜拳平局，无人获得步数");
+            room.addLog("第 " + (room.getRound() - 1) + " 回合结束，进入第 " + room.getRound() + " 回合猜拳");
+            logToConsole("第 " + (room.getRound() - 1) + " 回合猜拳平局，无人获得步数");
+            logToConsole("第 " + (room.getRound() - 1) + " 回合结束，进入第 " + room.getRound() + " 回合猜拳");
             room.setPhase("GUESS");                          // 重新猜拳
             gameDao.updateStatus(room);
             return;
@@ -638,7 +641,7 @@ public class GameService {
 
                 // ---- 6. 血祭：献祭生命获得攻击力翻倍buff ----
                 //       条件：没有buff + HP > 1（至少留1点血）
-                //       HP公式：(hp + 1) / 2 向下取整
+                //       HP公式：(hp + 1) / 2 向上取整（ceil），例：HP=5→3，HP=4→2
                 case 6:
                     if (!dbPlayer.isBuff() && dbPlayer.getHp() > 1) {
                         int newHp = (dbPlayer.getHp() + 1) / 2;  // 血祭后HP减半（向上取整）
@@ -810,11 +813,12 @@ public class GameService {
     /**
      * 定时清理不活跃房间。
      *
-     * <p>每 60 秒执行一次（{@code fixedRate=60000}），清理条件：
+     * <p>每 5 秒执行一次（{@code fixedRate=5000}），清理条件：
      * <ul>
-     *   <li>所有玩家 lastActivity 超过 2 分钟未更新</li>
-     *   <li>房间状态为 FINISHED 且所有玩家不活跃</li>
+     *   <li>房间状态为 FINISHED 或所有玩家 lastActivity 超过 2 分钟未更新</li>
      * </ul>
+     * 选择 5 秒扫描 + 2 分钟阈值的理由：
+     * 5 秒间隔保证断线检测及时（游戏进行中），2 分钟宽限期避免网络波动误清理。
      * </p>
      */
     @Scheduled(fixedRate = 5000)                             // Spring定时任务：每5秒执行
@@ -842,6 +846,8 @@ public class GameService {
                     long idle = System.currentTimeMillis() - last.getTime();
                     if (idle > disconnectThreshold) {
                         // 玩家断线，但尚未记录过 → 写入日志
+                        // 注意：contains + add 非原子操作，但在 ConcurrentHashMap
+                        // compute 回调内串行执行，且 rooms.entrySet() 迭代时不会并发修改自身，安全
                         if (!room.getDisconnectedLogged().contains(p.getId())) {
                             room.addLog(p.getName() + " 异常断开");
                             logToConsole(p.getName() + " 异常断开");
@@ -877,10 +883,8 @@ public class GameService {
         String ip = getClientIp();
         if (ip != null) {
             System.out.println("[IP: " + ip + "] " + msg);
-            log.info("[IP: {}] {}", ip, msg);
         } else {
             System.out.println("[无] " + msg);
-            log.info("[无] {}", msg);
         }
     }
 

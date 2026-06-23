@@ -6,7 +6,7 @@
   页面功能:
     1. 显示房间ID（支持一键复制，便于分享给其他玩家）
     2. 显示房间状态、当前人数/目标人数
-    3. 每3秒 AJAX 轮询，实时同步玩家加入/离开
+    3. 每2秒 AJAX 轮询，实时同步玩家加入/离开
     4. 房主可见"直接开始"按钮，无需等待满员即可强制开始游戏
     5. 当房间状态变为 PLAYING 时，自动跳转到游戏页面
     6. "返回首页"链接用于离开房间
@@ -19,6 +19,15 @@
     <link rel="stylesheet" href="/css/common.css">
     <script src="/js/common.js"></script>
     <style>
+        /* ===== 等待大厅页面专属样式 ===== */
+        /* body: 浅灰背景 */
+        /* .container: 白色卡片容器，600px宽，圆角阴影 */
+        /* .room-id: 房间ID显示区，浅蓝背景，user-select:all 方便全选复制 */
+        /* .copy-btn: 复制按钮，蓝色底 */
+        /* .back-link: 返回首页链接，红色警示色 */
+        /* .hint: 复制提示，默认隐藏 */
+        /* .start-btn: 房主直接开始按钮，绿色 */
+        /* .players-list li: 玩家列表项，底部浅灰分割线 */
         body { background: #f5f5f5; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         h1 { text-align: center; }
@@ -40,7 +49,7 @@
 <body>
 
 <!-- ========== 规则弹窗（引用公共 Thymeleaf 片段） ========== -->
-<div th:replace="fragments/rules :: rulesPopup"></div>
+<div th:replace="~{fragments/rules :: rulesPopup}"></div>
 
 <!-- ========== 主内容区 ========== -->
 <div class="container">
@@ -58,7 +67,7 @@
         <div id="gameStarting" style="display:none">
             <p>游戏即将开始，正在跳转...</p>
         </div>
-        <p style="color:gray">页面每3秒自动刷新，等待其他玩家加入...</p>
+        <p style="color:gray">页面每2秒自动刷新，等待其他玩家加入...</p>
     </div>
 
     <!-- ===== 玩家列表 ===== -->
@@ -70,6 +79,7 @@
     </div>
 
     <!-- ===== 房主直接开始按钮 ===== -->
+    <!-- 房主判断：当前玩家非空、房间玩家列表非空、且当前玩家ID等于列表中第一个玩家（房主）的ID -->
     <div th:if="${player != null and !room.players.isEmpty() and player.id == room.players.get(0).id}">
         <button class="start-btn" onclick="forceStart()">直接开始</button>
         <div id="startError" class="error-msg"></div>
@@ -98,6 +108,19 @@
     });
 
     // ===== 房主强制开始（增加前端状态检查，避免无效请求） =====
+    /**
+     * forceStart() — 房主强制开始游戏
+     *
+     * 功能：发送 POST /lobby/{roomId}/{playerId}/start 请求，强制开始游戏（无需等满员）
+     * 前端校验：
+     *   1. 游戏已开始 → 直接跳转 /game/{roomId}/{playerId}
+     *   2. 人数不足2人 → 显示错误提示
+     * 后端校验：仅房主可调用，返回 { success: boolean, error?: string }
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用：成功后跳转到游戏页面，失败时显示错误信息到 #startError
+     */
     async function forceStart() {
         var errorDiv = document.getElementById('startError');
         errorDiv.textContent = '';
@@ -127,6 +150,30 @@
     }
 
     // ===== AJAX 轮询（替代 meta refresh） =====
+    /**
+     * pollState() — AJAX 轮询房间状态
+     *
+     * API 调用: GET /api/room/{roomId}?playerId={playerId}
+     * 轮询间隔: 每 2 秒（由 setInterval 驱动）
+     *
+     * 响应 JSON 结构:
+     *   - status:    String  — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
+     *   - players:   Array   — 玩家列表 [{id, name, online, ...}]
+     *   - playerCount: int   — 目标玩家数
+     *
+     * 跳转逻辑:
+     *   1. !data.status → 房间不存在 → 跳转首页 /
+     *   2. data.status === 'PLAYING' → 游戏已开始 → 跳转 /game/{roomId}/{playerId}
+     *
+     * UI 更新:
+     *   - 更新状态文本 (#statusText)
+     *   - 更新当前人数 (#playerCountText)
+     *   - 渲染玩家列表（含断线标记和"（我）"标记）
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用：更新 DOM 元素、可能触发页面跳转
+     */
     async function pollState() {
         try {
             var res = await fetch('/api/room/' + roomId + '?playerId=' + playerId);

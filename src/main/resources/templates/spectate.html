@@ -50,6 +50,12 @@
     <title>马刀游戏 - 观战</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
+        /* ===== 观战页面专属样式 ===== */
+        /* body: 暗色渐变背景 (深蓝 #1a1a2e -> #16213e -> #0f3460)，白色文字 */
+        /* .top-bar: 顶部导航栏，flexbox 两端对齐，左侧退出按钮+右侧规则按钮 */
+        /* .exit-btn: 退出观战按钮，红色背景 (#e74c3c) */
+        /* .exit-btn:hover: 悬停时深红色 */
+        /* .rules-container: 规则弹窗容器，position:relative 用于内部子元素定位 */
         body {
             background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
             color: white;
@@ -82,7 +88,7 @@
       ===== 规则弹窗（引用公共 Thymeleaf 片段） =====
       与 action.html 相同的规则弹窗，配色适配暗色背景
     -->
-    <div th:replace="fragments/rules :: rulesPopup"></div>
+    <div th:replace="~{fragments/rules :: rulesPopup}"></div>
 </div>
 
 <!--
@@ -154,16 +160,20 @@
 
     async function fetchState() {
         try {
+            // 构建轮询 URL: GET /api/room/{roomId}?playerId={playerId}
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
             var res = await fetch(url);
             if (!res.ok) return;
             var data = await res.json();
+            // 房间不存在 → 跳转首页/
             if (!data.status) { window.location.href = '/'; return; }
 
+            // 更新三个只读面板：玩家状态、操作日志、聊天消息（观战者不参与交互）
             updatePlayers(data.players);
             updateLogs(data.actionLogs);
             updateChat(data.chatMessages);
 
+            // 游戏结束 → 跳转结果页（观战者同样可以查看最终结果）
             if (data.status === 'FINISHED') { window.location.href = '/game/' + roomId + '/' + playerId; }
             restoreRulesPopup();
         } catch (e) { console.error('状态刷新失败', e); }

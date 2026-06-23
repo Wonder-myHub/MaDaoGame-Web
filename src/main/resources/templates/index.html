@@ -14,7 +14,9 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>马刀游戏 - 首页</title>
+    <!-- 引入公共样式文件 common.css：提供全局页面布局、玩家状态卡片、日志面板、聊天面板、规则弹窗等通用样式 -->
     <link rel="stylesheet" href="/css/common.css">
+    <!-- 引入公共JS文件 common.js：提供 escapeHtml、updatePlayers、updateLogs、updateChat、initChatForm、restoreRulesPopup 等全局函数 -->
     <script src="/js/common.js"></script>
     <style>
         body { background: #f5f5f5; }
@@ -31,10 +33,11 @@
 <body>
 
 <!-- ========== 规则弹窗区域（引用公共 Thymeleaf 片段） ========== -->
-<div th:replace="fragments/rules :: rulesPopup"></div>
+<div th:replace="~{fragments/rules :: rulesPopup}"></div>
 
 <!-- ========== 主内容区：创建房间 + 加入房间 ========== -->
 <div class="container">
+    <!-- 页面主标题：马刀游戏首页入口，提供"创建房间"和"加入房间"两种方式开始游戏 -->
     <h1>⚔️ 马刀游戏</h1>
 
     <!--

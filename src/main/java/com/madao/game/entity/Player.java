@@ -52,43 +52,63 @@ public class Player {
 
     // ========================== Getter / Setter ==========================
 
+    /** @return 玩家唯一标识（UUID） */
     public String getId() { return id; }
+    /** @param id 设置玩家标识 */
     public void setId(String id) { this.id = id; }
 
+    /** @return 所属房间 UUID */
     public String getRoomId() { return roomId; }
+    /** @param roomId 设置所属房间 */
     public void setRoomId(String roomId) { this.roomId = roomId; }
 
+    /** @return 玩家昵称 */
     public String getName() { return name; }
+    /** @param name 设置昵称 */
     public void setName(String name) { this.name = name; }
 
+    /** @return 当前 HP */
     public int getHp() { return hp; }
     /** 设置HP时自动钳制到不小于0，避免出现负数生命值 */
     public void setHp(int hp) { this.hp = Math.max(hp, 0); }
 
+    /** @return 当前步数（行动点） */
     public int getSteps() { return steps; }
+    /** @param steps 设置步数 */
     public void setSteps(int steps) { this.steps = steps; }
 
-    /** @return 是否拥有马 */
+    /** @return 是否拥有马（解锁"踢"技能） */
     public boolean isHorse() { return horse; }
+    /** @param horse 设置是否有马 */
     public void setHorse(boolean horse) { this.horse = horse; }
 
-    /** @return 是否拥有刀 */
+    /** @return 是否拥有刀（解锁"刺"技能） */
     public boolean isKnife() { return knife; }
+    /** @param knife 设置是否有刀 */
     public void setKnife(boolean knife) { this.knife = knife; }
 
     /** @return 是否有血祭buff（下次攻击伤害翻倍） */
     public boolean isBuff() { return buff; }
+    /** @param buff 设置血祭buff状态 */
     public void setBuff(boolean buff) { this.buff = buff; }
 
+    /** @return 当前位置："city-N"（城内）或 "outside"（城外） */
     public String getLocation() { return location; }
+    /** @param location 设置位置 */
     public void setLocation(String location) { this.location = location; }
 
+    /** @return 是否存活 */
     public boolean isAlive() { return alive; }
+    /** @param alive 设置存活状态 */
     public void setAlive(boolean alive) { this.alive = alive; }
 
+    /** @return 本轮猜拳手势，null 表示尚未出拳 */
     public String getGuess() { return guess; }
+    /** @param guess 设置猜拳手势 */
     public void setGuess(String guess) { this.guess = guess; }
 
+    /** @return 最后一次活动时间戳，用于在线判定 */
     public Timestamp getLastActivity() { return lastActivity; }
+    /** @param lastActivity 设置活动时间 */
     public void setLastActivity(Timestamp lastActivity) { this.lastActivity = lastActivity; }
 }

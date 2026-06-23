@@ -61,9 +61,11 @@ import java.util.stream.Collectors;
 @Controller
 public class GameController {
 
+    /** 游戏核心服务，处理房间生命周期、猜拳判定、行动执行等业务逻辑 */
     @Autowired
     private GameService gameService;
 
+    /** 玩家数据访问对象，API 层直接查询玩家数据（如在线判定、昵称查询） */
     @Autowired
     private PlayerDao playerDao;
 
@@ -305,6 +307,10 @@ public class GameController {
     /**
      * 【核心API】获取房间完整状态 —— 前端轮询此接口驱动游戏界面。
      *
+     * <h3>隐私注意</h3>
+     * <p>当前实现中所有玩家的 guess（猜拳手势）直接暴露给前端所有客户端。
+     * 如有保密需求，应在 players 列表构建时按请求者身份过滤 guess 字段。</p>
+     *
      * <h3>返回数据结构</h3>
      * <pre>
      * {
@@ -362,7 +368,9 @@ public class GameController {
             pm.put("buff", p.isBuff());                    // 是否有血祭buff（伤害翻倍）
             pm.put("location", p.getLocation());
             pm.put("alive", p.isAlive());
-            pm.put("guess", p.getGuess());                 // 猜拳手势（他人不可见，为null）
+            pm.put("guess", p.getGuess());                 // 猜拳手势；注意：此实现直接暴露所有玩家的 guess 值到前端；
+                                                            // 若需保密（他人可见为 null），应在此处添加 requestPlayer 身份判断：
+                                                            // p.getId().equals(playerId) ? p.getGuess() : null
             pm.put("online", gameService.isPlayerOnline(p)); // 是否在线（用于前端断线标记）
             return pm;
         }).collect(Collectors.toList());

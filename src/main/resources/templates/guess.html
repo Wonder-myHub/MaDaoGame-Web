@@ -29,7 +29,7 @@
 <body>
 
 <!-- ========== 规则弹窗（引用公共 Thymeleaf 片段） ========== -->
-<div th:replace="fragments/rules :: rulesPopup"></div>
+<div th:replace="~{fragments/rules :: rulesPopup}"></div>
 
 <!-- ========== 玩家状态区 ========== -->
 <!-- 通过 JS updatePlayers() 动态渲染所有玩家卡片 -->
@@ -101,6 +101,37 @@
     var playerId = /*[[${playerId}]]*/ '';
 
     // ===== AJAX 状态刷新 =====
+    /**
+     * fetchState() — 异步获取房间状态并处理猜拳页面逻辑
+     *
+     * API 调用: GET /api/room/{roomId}?playerId={playerId}
+     * 轮询间隔: 每 2 秒
+     *
+     * 响应 JSON 数据结构:
+     *   - status:                String   — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
+     *   - phase:                 String   — 当前阶段: "GUESS" / "ACTION"
+     *   - round:                 int      — 当前回合数
+     *   - players:               Array    — 所有玩家信息 [{id, name, hp, steps, horse, knife, buff, location, alive, guess}, ...]
+     *   - currentPlayerId:       String   — 当前玩家 UUID
+     *   - currentPlayerAlive:    boolean  — 当前玩家是否存活
+     *   - currentPlayerGuess:    String|null — 当前玩家手势 ("石头"/"剪刀"/"布"/null)
+     *   - playersNotGuessed:     Array    — 未出拳玩家名称列表 (String[])
+     *   - actionLogs:            Array    — 行动日志 (String[])
+     *   - chatMessages:          Array    — 聊天消息 (String[])
+     *
+     * 页面逻辑:
+     *   1. !data.status                       → 房间不存在 → 跳转 /
+     *   2. data.status === 'FINISHED'              → 游戏结束   → 跳转结果页
+     *   3. !data.currentPlayerAlive           → 玩家死亡   → 跳转观战页
+     *   4. data.phase === 'GUESS'                 → 猜拳阶段:
+     *      a. data.currentPlayerGuess == null → 显示猜拳按钮 (已出拳后会自动隐藏)
+     *      b. data.currentPlayerGuess != null → 隐藏按钮，显示等待区 + 未出拳玩家列表
+     *   5. data.phase === 'ACTION'               → 行动阶段 → 跳转行动页
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用：更新玩家卡片/日志/聊天 UI、可能触发页面跳转
+     */
     async function fetchState() {
         try {
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
@@ -135,6 +166,7 @@
                         detailDiv.innerHTML = '';
                     }
                 }
+                // data.phase === 'ACTION': 猜拳阶段结束，所有玩家已出拳，游戏进入行动阶段，跳转到行动页面
             } else if (data.phase === 'ACTION') {
                 window.location.href = '/game/' + roomId + '/' + playerId;
             }
@@ -145,6 +177,10 @@
 
     // ===== 猜拳提交 =====
     var gestureButtons = document.querySelectorAll('.gesture-form button');
+    // ===== 为每个猜拳按钮绑定点击事件 =====
+    // 回调参数 btn: HTMLButtonElement — 被点击的按钮元素
+    // btn.getAttribute('data-gesture') 获取手势类型: "石头" / "剪刀" / "布"
+    // 点击后通过 FormData 将 gesture 提交到 POST /api/guess/{roomId}/{playerId}
     gestureButtons.forEach(function(btn) {
         btn.addEventListener('click', async function() {
             var gesture = this.getAttribute('data-gesture');

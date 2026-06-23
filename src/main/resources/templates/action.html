@@ -49,6 +49,14 @@
     <title>马刀游戏 - 行动</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
+        /* ===== 行动页面专属样式 ===== */
+        /* .action-btn: 行动按钮，16px字号，cursor:pointer 鼠标指针 */
+        /* .action-btn.active: 激活状态的行动按钮，浅蓝色背景 */
+        /* .section: 目标/城市选择区域，默认隐藏，浅灰背景+边框 */
+        /* .section label: 选择区标签，粗体 */
+        /* select: 下拉选择框，最小宽度150px */
+        /* #finalSubmit: 最终确认按钮，默认隐藏 */
+        /* #waitMessage: 等待提示区域，默认隐藏 */
         .action-btn { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
         .action-btn.active { background: #c0e0ff; }
         .section { margin: 15px 0; display: none; background: #f9f9f9; padding: 10px; border: 1px solid #ddd; }
@@ -68,7 +76,7 @@
   全局点击监听: 点击容器外部自动关闭弹窗
 -->
 <!-- ========== 规则弹窗（引用公共 Thymeleaf 片段） ========== -->
-<div th:replace="fragments/rules :: rulesPopup"></div>
+<div th:replace="~{fragments/rules :: rulesPopup}"></div>
 
 <!--
   ==================== 玩家状态面板 ====================

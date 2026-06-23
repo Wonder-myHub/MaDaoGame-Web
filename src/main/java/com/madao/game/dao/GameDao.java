@@ -74,13 +74,13 @@ public class GameDao {
      */
     public void updateStatus(GameRoom room) {
         String sql = "UPDATE game_room SET status=?, round=?, phase=?, winner=? WHERE id=?";
-        try (Connection conn = DBUtil.getConnection();
+        try (Connection conn = DBUtil.getConnection();             // try-with-resources 自动关闭连接
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, room.getStatus());
-            ps.setInt(2, room.getRound());
-            ps.setString(3, room.getPhase());
-            ps.setString(4, room.getWinner());
-            ps.setString(5, room.getId());
+            ps.setString(1, room.getStatus());                     // WAITING / PLAYING / FINISHED
+            ps.setInt(2, room.getRound());                         // 当前回合数
+            ps.setString(3, room.getPhase());                      // GUESS / ACTION
+            ps.setString(4, room.getWinner());                     // 胜利者（可为 null）
+            ps.setString(5, room.getId());                         // WHERE 条件：房间 UUID
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("更新房间状态失败", e);
@@ -94,10 +94,10 @@ public class GameDao {
      */
     public void deleteById(String id) {
         String sql = "DELETE FROM game_room WHERE id = ?";
-        try (Connection conn = DBUtil.getConnection();
+        try (Connection conn = DBUtil.getConnection();             // 从连接池获取连接
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, id);
-            ps.executeUpdate();
+            ps.setString(1, id);                                   // 房间 UUID
+            ps.executeUpdate();                                    // 执行删除
         } catch (SQLException e) {
             throw new RuntimeException("删除房间记录失败", e);
         }

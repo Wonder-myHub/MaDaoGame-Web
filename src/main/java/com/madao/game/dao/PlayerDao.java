@@ -157,9 +157,9 @@ public class PlayerDao {
      */
     public void deleteByRoomId(String roomId) {
         String sql = "DELETE FROM player WHERE room_id = ?";
-        try (Connection conn = DBUtil.getConnection();
+        try (Connection conn = DBUtil.getConnection();             // 从连接池获取连接
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, roomId);
+            ps.setString(1, roomId);                               // 房间 UUID，删除该房间所有玩家
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("按房间ID删除玩家失败", e);
@@ -173,10 +173,10 @@ public class PlayerDao {
      */
     public void deleteById(String playerId) {
         String sql = "DELETE FROM player WHERE id = ?";
-        try (Connection conn = DBUtil.getConnection();
+        try (Connection conn = DBUtil.getConnection();             // 从连接池获取连接
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, playerId);
-            ps.executeUpdate();
+            ps.setString(1, playerId);                             // 玩家 UUID 主键
+            ps.executeUpdate();                                    // 执行删除
         } catch (SQLException e) {
             throw new RuntimeException("按玩家ID删除记录失败", e);
         }

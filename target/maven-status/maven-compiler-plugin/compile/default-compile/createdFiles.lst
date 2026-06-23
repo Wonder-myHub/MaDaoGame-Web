@@ -1,8 +1,0 @@
-com\madao\game\entity\GameRoom.class
-com\madao\game\util\DBUtil.class
-com\madao\game\entity\Player.class
-com\madao\game\dao\PlayerDao.class
-com\madao\game\controller\GameController.class
-com\madao\game\dao\GameDao.class
-com\madao\game\MadaoGameApplication.class
-com\madao\game\service\GameService.class

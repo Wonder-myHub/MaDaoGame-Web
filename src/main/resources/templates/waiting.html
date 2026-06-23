@@ -39,7 +39,7 @@
 <body>
 
 <!-- ========== 规则弹窗（引用公共 Thymeleaf 片段） ========== -->
-<div th:replace="fragments/rules :: rulesPopup"></div>
+<div th:replace="~{fragments/rules :: rulesPopup}"></div>
 
 <!--
   ==================== 玩家状态面板 ====================
@@ -132,6 +132,40 @@
     var roomId = /*[[${roomId}]]*/ '';
     var playerId = /*[[${playerId}]]*/ '';
 
+    /**
+     * fetchState() — 异步获取游戏状态并自动跳转（核心轮询函数）
+     *
+     * API 调用: GET /api/room/{roomId}?playerId={playerId}
+     * 轮询间隔: 每 2 秒（由 setInterval(fetchState, 2000) 驱动）
+     *
+     * 响应 JSON 数据结构:
+     *   - status:                String   — 房间状态: "WAITING" / "PLAYING" / "FINISHED"
+     *   - phase:                 String   — 当前阶段: "GUESS" / "ACTION"
+     *   - round:                 int      — 当前回合数
+     *   - players:               Array    — 所有玩家信息 [{id, name, hp, steps, horse, knife, buff, location, alive, guess}, ...]
+     *   - currentPlayerId:       String   — 当前玩家 UUID
+     *   - currentPlayerAlive:    boolean  — 当前玩家是否存活
+     *   - currentPlayerGuess:    String   — 当前玩家的猜拳手势 (null=未出拳)
+     *   - currentPlayerSteps:    int      — 当前玩家剩余步数
+     *   - isCurrentActionPlayer: boolean  — 是否轮到当前玩家行动
+     *   - playersNotGuessed:     Array    — 未出拳的玩家名称列表 (String[])
+     *   - currentActionPlayer:   String   — 当前正在行动的玩家名称
+     *   - currentActionSteps:    int      — 当前行动者的剩余步数
+     *   - actionLogs:            Array    — 行动日志 (String[])
+     *   - chatMessages:          Array    — 聊天消息 (String[])
+     *
+     * 6 种跳转逻辑（按优先级）:
+     *   1. !data.status               → 房间不存在      → 跳转首页 /
+     *   2. data.status === 'FINISHED'    → 游戏结束        → 跳转结果页 /game/{roomId}/{playerId}
+     *   3. !data.currentPlayerAlive   → 玩家已死亡      → 跳转观战页 /game/{roomId}/{playerId}
+     *   4. data.phase === 'GUESS' && data.currentPlayerGuess == null → 未出拳 → 跳转猜拳页 /game/{roomId}/{playerId}
+     *   5. data.phase === 'ACTION' && data.isCurrentActionPlayer && data.currentPlayerSteps > 0 → 轮到自己行动 → 跳转行动页
+     *   6. 其他情况 → 留在本页继续等待，更新等待信息（等待谁出拳/谁行动）
+     *
+     * @async
+     * 无参数，无返回值
+     * 副作用：更新 players/logs/chat UI、可能触发页面跳转
+     */
     async function fetchState() {
         try {
             var url = '/api/room/' + roomId + '?playerId=' + playerId;
