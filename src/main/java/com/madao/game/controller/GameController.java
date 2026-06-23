@@ -285,7 +285,7 @@ public class GameController {
 
     /**
      * 玩家主动离开房间。
-     * 将 lastActivity 设为 epoch(0) 标记退出，阻止重连。
+     * 从数据库中删除玩家记录，从内存中移除。
      */
     @GetMapping("/leave/{roomId}/{playerId}")
     public String leave(@PathVariable String roomId, @PathVariable String playerId) {

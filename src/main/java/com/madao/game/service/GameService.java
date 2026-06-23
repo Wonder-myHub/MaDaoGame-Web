@@ -5,6 +5,7 @@ import com.madao.game.dao.PlayerDao;
 import com.madao.game.entity.GameRoom;
 import com.madao.game.entity.Player;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -74,6 +75,7 @@ import java.util.stream.Collectors;
  * @author madao
  */
 @Service
+@DependsOn("DBUtil")
 public class GameService {
 
     /** 内存房间缓存，key=房间UUID，使用 ConcurrentHashMap 保证并发读安全 */
@@ -146,7 +148,7 @@ public class GameService {
      * @param roomId     房间UUID
      * @param playerName 玩家昵称（trim后使用）
      * @return 玩家UUID（新玩家或重连玩家的ID）
-     * @throws RuntimeException 房间不存在/已满/昵称冲突/已主动退出
+     * @throws RuntimeException 房间不存在/已满/昵称冲突
      */
     public String joinRoom(String roomId, String playerName) {
         // 使用 AtomicReference 传递 compute 闭包内的返回值
@@ -177,10 +179,6 @@ public class GameService {
                     // 如果同名玩家在线（5秒内有活动），拒绝新玩家加入
                     if (isPlayerOnline(existingPlayer)) {
                         throw new RuntimeException("该昵称的玩家当前在线，无法加入");
-                    }
-                    // lastActivity==0 表示玩家主动离开了，不允许重连
-                    if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
-                        throw new RuntimeException("该昵称的玩家已主动退出，无法重新加入");
                     }
                     // 更新在线时间，同步到DB和内存 → 完成重连
                     existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
@@ -237,9 +235,6 @@ public class GameService {
                 if (isPlayerOnline(existingPlayer)) {
                     throw new RuntimeException("该昵称的玩家当前在线，无法加入");
                 }
-                if (existingPlayer.getLastActivity() != null && existingPlayer.getLastActivity().getTime() == 0) {
-                    throw new RuntimeException("您已主动退出，无法重新加入");
-                }
                 // 重连：更新在线时间，同步到DB和内存
                 existingPlayer.setLastActivity(new Timestamp(System.currentTimeMillis()));
                 playerDao.update(existingPlayer);
@@ -264,7 +259,6 @@ public class GameService {
      * <p>判定规则：
      * <ul>
      *   <li>lastActivity 为 null → 离线</li>
-     *   <li>lastActivity.getTime() == 0 → 主动退出，离线</li>
      *   <li>距上次活动超过 5 秒 → 判定为离线</li>
      * </ul>
      *
@@ -274,7 +268,6 @@ public class GameService {
     public boolean isPlayerOnline(Player player) {
         Timestamp last = player.getLastActivity();
         if (last == null) return false;                      // 从未活动过
-        if (last.getTime() == 0) return false;               // 主动退出标记
         return (System.currentTimeMillis() - last.getTime()) < 5000; // 5秒内有活动
     }
 
@@ -867,7 +860,7 @@ public class GameService {
                     Player dbPlayer = playerDao.findById(p.getId());
                     if (dbPlayer == null) continue;
                     Timestamp last = dbPlayer.getLastActivity();
-                    if (last == null || last.getTime() == 0) continue; // 跳过从未活动或已主动退出
+                    if (last == null) continue; // 跳过从未活动的玩家
                     long idle = System.currentTimeMillis() - last.getTime();
                     if (idle > disconnectThreshold) {
                         if (!room.getDisconnectedLogged().contains(p.getId())) {
