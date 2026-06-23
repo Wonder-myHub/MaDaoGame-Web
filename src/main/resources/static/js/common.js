@@ -230,13 +230,13 @@ function initChatForm() {
     });
 }
 
-// ========== 智能轮询（页面隐藏时自动暂停） ==========
+// ========== 智能轮询（页面隐藏时保持心跳） ==========
 
 /**
  * smartPoll(fn, intervalMs) — 智能定时轮询
  *
  * 相比 setInterval 的改进：
- *   1. 当页面不可见（切到后台标签页）时自动跳过执行，减少服务器压力
+ *   1. 当页面不可见（切到后台标签页）时跳过 UI 刷新（fn），但持续发送心跳保持在线
  *   2. 首次立即执行 fn()，无需等待第一个间隔
  *   3. 返回 { stop } 对象以便手动停止
  *
@@ -248,8 +248,11 @@ function smartPoll(fn, intervalMs) {
     var timer;
     function schedule() {
         timer = setTimeout(function() {
-            // 页面不可见时跳过本次执行，等下一轮
             if (document.hidden) {
+                // 页面隐藏时：跳过 UI 刷新，但发送心跳保持在线
+                if (typeof roomId !== 'undefined' && typeof playerId !== 'undefined') {
+                    fetch('/api/room/' + roomId + '?playerId=' + playerId);
+                }
                 schedule();
                 return;
             }
