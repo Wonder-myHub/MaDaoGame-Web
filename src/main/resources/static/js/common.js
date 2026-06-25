@@ -263,8 +263,17 @@ function smartPoll(fn, intervalMs) {
     }
 
     // 页面从隐藏恢复可见时立即刷新，无需等待 setTimeout 到期
+    // 页面变为隐藏时立即发送一次心跳，在浏览器开始限流定时器前刷新 lastActivity
     function onVisibilityChange() {
-        if (!document.hidden) fn();
+        if (document.hidden) {
+            // 页面即将隐藏 → 立即发送心跳，确保 lastActivity 在进入后台前是最新的
+            if (typeof roomId !== 'undefined' && typeof playerId !== 'undefined') {
+                fetch('/api/room/' + roomId + '?playerId=' + playerId);
+            }
+        } else {
+            // 页面恢复可见 → 立即刷新 UI
+            fn();
+        }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
 

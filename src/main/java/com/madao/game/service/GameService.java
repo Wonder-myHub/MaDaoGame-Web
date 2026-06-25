@@ -133,7 +133,6 @@ public class GameService {
      * <p><b>WAITING 状态</b></p>
      * <ol>
      *   <li>检查房间内是否有同名玩家 → 存在且离线则重连；存在且在线则拒绝</li>
-     *   <li>检查玩家是否主动退出过（lastActivity == 0）→ 拒绝重连</li>
      *   <li>检查房间是否已满 → 拒绝加入</li>
      *   <li>创建新玩家，分配城市（city-N），持久化到DB和内存</li>
      *   <li>人满自动开始游戏</li>
@@ -261,6 +260,8 @@ public class GameService {
      *   <li>lastActivity 为 null → 离线</li>
      *   <li>距上次活动超过 5 秒 → 判定为离线</li>
      * </ul>
+     * <p>5秒阈值：前端 smartPoll 每2~5秒发一次心跳。浏览器后台标签页
+     * 0~5分钟内不会限流定时器，心跳正常间隔即可维持在线状态。</p>
      *
      * @param player 待判定的玩家（需从DB加载，确保 lastActivity 最新）
      * @return true=在线（5秒内有活动）
@@ -834,7 +835,7 @@ public class GameService {
     @Scheduled(fixedRate = 5000)                             // Spring定时任务：每5秒执行
     public void cleanupInactiveRooms() {
         long inactiveThreshold = System.currentTimeMillis() - 2 * 60 * 1000; // 2分钟前
-        long disconnectThreshold = 5 * 1000;                 // 断线阈值：5秒无活动
+        long disconnectThreshold = 5 * 1000;                 // 断线阈值：5秒无活动（与isPlayerOnline一致）
         List<String> toRemove = new ArrayList<>();
         for (Map.Entry<String, GameRoom> entry : rooms.entrySet()) {
             GameRoom room = entry.getValue();

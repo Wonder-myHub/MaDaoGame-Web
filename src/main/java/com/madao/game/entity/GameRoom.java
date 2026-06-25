@@ -57,7 +57,7 @@ public class GameRoom {
     /** 行动队列当前指针：指向正在行动的玩家在 actionQueue 中的索引 */
     private int currentActionIndex = 0;
 
-    /** 行动日志列表，最多保留30条，记录每回合所有玩家操作（CopyOnWriteArrayList 保证并发读安全） */
+    /** 行动日志列表，最多保留50条，记录每回合所有玩家操作（CopyOnWriteArrayList 保证并发读安全） */
     private List<String> actionLogs = new CopyOnWriteArrayList<>();
 
     /** 聊天消息列表，最多保留50条（CopyOnWriteArrayList 保证并发读安全） */
@@ -76,11 +76,11 @@ public class GameRoom {
 
     /**
      * 添加一条行动日志（仅存入内存，不输出控制台）。
-     * 当日志超过30条时，自动删除最旧的一条。
+     * 当日志超过50条时，自动删除最旧的一条。
      */
     public void addLog(String log) {
         actionLogs.add(log);
-        if (actionLogs.size() > 30) actionLogs.remove(0); // 只保留最近30条
+        if (actionLogs.size() > 50) actionLogs.remove(0); // 只保留最近50条
     }
 
     /**
@@ -88,7 +88,7 @@ public class GameRoom {
      */
     public void addLogQuiet(String log) {
         actionLogs.add(log);
-        if (actionLogs.size() > 30) actionLogs.remove(0);
+        if (actionLogs.size() > 50) actionLogs.remove(0);
     }
 
     // ==================================================================================
