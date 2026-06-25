@@ -1,5 +1,7 @@
 package com.madao.game.entity;
 
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -66,6 +68,9 @@ public class GameRoom {
     /** 已记录断线日志的玩家ID集合，用于去重（避免定时任务重复写入断线日志） */
     private Set<String> disconnectedLogged = ConcurrentHashMap.newKeySet();
 
+    /** 时间格式化器：时分秒，用于前端操作记录和聊天消息的时间前缀 */
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+
     // ==================================================================================
     //  日志管理
     // ==================================================================================
@@ -76,18 +81,19 @@ public class GameRoom {
 
     /**
      * 添加一条行动日志（仅存入内存，不输出控制台）。
-     * 当日志超过50条时，自动删除最旧的一条。
+     * 自动追加 HH:mm:ss 时间前缀，当日志超过50条时自动删除最旧的一条。
      */
     public void addLog(String log) {
-        actionLogs.add(log);
+        actionLogs.add(LocalTime.now().format(TIME_FMT) + " " + log);
         if (actionLogs.size() > 50) actionLogs.remove(0); // 只保留最近50条
     }
 
     /**
      * 静默添加一条行动日志（不输出到控制台，用于批量日志如猜拳结果）。
+     * 自动追加 HH:mm:ss 时间前缀。
      */
     public void addLogQuiet(String log) {
-        actionLogs.add(log);
+        actionLogs.add(LocalTime.now().format(TIME_FMT) + " " + log);
         if (actionLogs.size() > 50) actionLogs.remove(0);
     }
 
@@ -100,10 +106,10 @@ public class GameRoom {
     public void setChatMessages(List<String> chatMessages) { this.chatMessages = chatMessages; }
 
     /**
-     * 添加一条聊天消息，超过50条时自动删除最旧的一条。
+     * 添加一条聊天消息，自动追加 HH:mm:ss 时间前缀，超过50条时自动删除最旧的一条。
      */
     public void addChatMessage(String msg) {
-        chatMessages.add(msg);
+        chatMessages.add(LocalTime.now().format(TIME_FMT) + " " + msg);
         if (chatMessages.size() > 50) chatMessages.remove(0);
     }
 

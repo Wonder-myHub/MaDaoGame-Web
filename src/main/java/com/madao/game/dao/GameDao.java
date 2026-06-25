@@ -2,6 +2,8 @@ package com.madao.game.dao;
 
 import com.madao.game.entity.GameRoom;
 import com.madao.game.util.DBUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.sql.*;
@@ -18,6 +20,8 @@ import java.sql.*;
  */
 @Repository
 public class GameDao {
+
+    private static final Logger log = LoggerFactory.getLogger(GameDao.class);
 
     /**
      * 插入一条新的游戏房间记录。
@@ -113,7 +117,7 @@ public class GameDao {
         try (Connection conn = DBUtil.getConnection();
              Statement stmt = conn.createStatement()) {
             int deleted = stmt.executeUpdate(sql);
-            System.out.println("已清理 game_room 表: " + deleted + " 条记录");
+            log.info("已清理 game_room 表: {} 条记录", deleted);
         } catch (SQLException e) {
             throw new RuntimeException("清空房间表失败", e);
         }

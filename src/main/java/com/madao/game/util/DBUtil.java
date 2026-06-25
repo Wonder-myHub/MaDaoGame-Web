@@ -96,7 +96,6 @@ public class DBUtil {
              Statement stmt = conn.createStatement()) {
             stmt.execute(createGameRoom);
             stmt.execute(createPlayer);
-            System.out.println("数据库表已创建或已存在（HikariCP 连接池）");
             log.info("数据库表已创建或已存在（HikariCP 连接池）");
         } catch (SQLException e) {
             throw new RuntimeException("数据库建表失败", e);

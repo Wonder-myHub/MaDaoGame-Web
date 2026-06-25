@@ -77,6 +77,7 @@ public class GameController {
      * 首页 —— 创建房间 / 加入房间入口。
      * @return index 模板
      */
+    //当用户用浏览器访问 http://localhost:8080/（网站根路径）时，调用这个 index() 方法。
     @GetMapping("/")
     public String index() {
         return "index";
@@ -96,7 +97,7 @@ public class GameController {
             model.addAttribute("error", "玩家数量至少为2人");
             return "index";                                  // 校验失败，回首页
         }
-        String trimmedName = name.trim();
+        String trimmedName = name.trim(); //去掉用户输入昵称首尾的空白字符（空格、制表符、换行等）。
         if (trimmedName.isEmpty() || trimmedName.length() > 20) {
             model.addAttribute("error", "昵称长度需在1-20个字符之间");
             return "index";
@@ -115,6 +116,7 @@ public class GameController {
      * 加入已有房间。
      * 根据房间当前状态决定重定向目标：游戏中 → /game，等待中 → /lobby。
      */
+    //当用户提交加入房间的表单时（POST 请求 /join），调用下面这个 join() 方法。
     @PostMapping("/join")
     public String join(@RequestParam String roomId, @RequestParam String name, Model model) {
         String trimmedName = name.trim();
@@ -125,6 +127,7 @@ public class GameController {
         try {
             String playerId = gameService.joinRoom(roomId.trim(), trimmedName);
             GameRoom room = gameService.getRoom(roomId.trim());
+            //判断房间现在是游戏中还是等待中
             if (room != null && ("PLAYING".equals(room.getStatus()) || "FINISHED".equals(room.getStatus()))) {
                 return "redirect:/game/" + roomId.trim() + "/" + playerId;  // 已在游戏中
             } else {
@@ -141,7 +144,7 @@ public class GameController {
      * 显示房间内玩家列表、聊天消息，等待人满或房主开始游戏。
      * 访问时更新玩家 lastActivity（心跳）。
      */
-    @GetMapping("/lobby/{roomId}/{playerId}")
+    @GetMapping("/lobby/{roomId}/{playerId}") //说明了用户身份playerId和目的地roomId(某房间的等待大厅)
     public String lobby(@PathVariable String roomId, @PathVariable String playerId, Model model) {
         GameRoom room = gameService.getRoom(roomId);
         Player player = playerDao.findById(playerId);

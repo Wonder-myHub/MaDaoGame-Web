@@ -4,6 +4,8 @@ import com.madao.game.dao.GameDao;
 import com.madao.game.dao.PlayerDao;
 import com.madao.game.entity.GameRoom;
 import com.madao.game.entity.Player;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -78,6 +80,8 @@ import java.util.stream.Collectors;
 @DependsOn("DBUtil")
 public class GameService {
 
+    private static final Logger log = LoggerFactory.getLogger(GameService.class);
+
     /** 内存房间缓存，key=房间UUID，使用 ConcurrentHashMap 保证并发读安全 */
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
 
@@ -99,7 +103,7 @@ public class GameService {
     public void initCleanup() {
         playerDao.deleteAll();
         gameDao.deleteAll();
-        System.out.println("启动清理完成：已清除所有遗留的房间和玩家数据");
+        log.info("启动清理完成：已清除所有遗留的房间和玩家数据");
     }
 
     // ==================================================================================
@@ -421,7 +425,7 @@ public class GameService {
             choices.put(p, p.getGuess());
         }
 
-        // 静默记录所有玩家出拳（不输出到控制台，避免刷屏）
+        // 静默记录所有玩家出拳（不输出到控制台）
         for (Player p : alive) {
             room.addLogQuiet(p.getName() + " 出了 " + choices.get(p));
         }
@@ -506,7 +510,10 @@ public class GameService {
      *
      * <h3>双副本同步策略</h3>
      * <p>玩家状态有 DB（dbPlayer）和内存（memPlayer）两份：
-     * 操作同时修改两份副本，确保一致性。涉及目标玩家时仅更新 DB。</p>
+     * 操作同时修改两份副本，确保一致性。涉及目标玩家时仅更新 DB。
+     * 目标玩家不走双副本模式，不额外创建 targetDb 和 targetMem 两个变量来同步，
+     * 而是直接修改内存中的目标对象，然后调用 playerDao.update() 将变更持久化到数据库。
+     * 这是一种更轻量的处理方式，因为目标玩家的当前状态已经在 room.getPlayers() 内存列表中实时可读了。</p>
      *
      * @param playerId   行动者UUID
      * @param actionType 行动类型（0-7）
@@ -515,14 +522,18 @@ public class GameService {
      * @return 操作结果描述
      */
     public String executeAction(String playerId, int actionType,
-                                 String targetId, String cityName) {
-        Player dbPlayer = playerDao.findById(playerId);      // 数据库副本
+                                String targetId, String cityName) {
+        Player dbPlayer = playerDao.findById(playerId);      // 数据库副本，从数据库里把当前行动者的最新状态查出来。
         if (dbPlayer == null) return "玩家不存在";
         String roomId = dbPlayer.getRoomId();
-
+        //创建一个可变的字符串容器，让 Lambda 表达式内部能够"间接"地把操作结果传回外部方法
+        //绕过 Java Lambda 不能修改外部局部变量限制
         java.util.concurrent.atomic.AtomicReference<String> resultRef =
                 new java.util.concurrent.atomic.AtomicReference<>();
-
+        //compute(key, remappingFunction) 是 ConcurrentHashMap 提供的一个原子操作，分为三步：
+        //1. 加锁	对 roomId 这个 key 加细粒度锁（只锁这个房间，不影响其他房间）
+        //2. 执行 Lambda	调用 (id, room) -> { ... }，其中 room 是当前值（可能为 null）
+        //3. 更新/删除	Lambda 返回的值会写回 Map；若返回 null，则删除该 key
         rooms.compute(roomId, (id, room) -> {
             if (room == null) {
                 resultRef.set("房间不存在");
@@ -548,6 +559,7 @@ public class GameService {
 
             boolean actionDone = false;                          // 标记行动是否有效执行
             String logMsg = "";
+            String deathLog = null;                              // 死亡日志，延后到伤害日志之后输出
 
             switch (actionType) {
                 // ---- 0. 放弃行动 ----
@@ -616,8 +628,7 @@ public class GameService {
                         logMsg = dbPlayer.getName() + " 踢了 " + target4.getName() + "，造成 " + dmg + " 点伤害";
                         if (target4.getHp() <= 0) {              // HP归零 → 死亡
                             playerDao.update(target4);
-                            room.addLog(target4.getName() + " 被踢出局！");
-                            logToConsole(target4.getName() + " 被踢出局！");
+                            deathLog = target4.getName() + " 被踢出局！";
                             checkGameEnd(room);                  // 检查是否游戏结束
                         }
                         actionDone = true;
@@ -642,8 +653,7 @@ public class GameService {
                         logMsg = dbPlayer.getName() + " 刺了 " + target5.getName() + "，造成 " + dmg + " 点伤害";
                         playerDao.update(target5);
                         if (target5.getHp() <= 0) {
-                            room.addLog(target5.getName() + " 被刺死！");
-                            logToConsole(target5.getName() + " 被刺死！");
+                            deathLog = target5.getName() + " 被刺死！";
                             checkGameEnd(room);
                         }
                         actionDone = true;
@@ -694,6 +704,10 @@ public class GameService {
                 playerDao.update(dbPlayer);                      // 持久化玩家状态
                 room.addLog(logMsg);
                 logToConsole(logMsg);
+                if (deathLog != null) {
+                    room.addLog(deathLog);
+                    logToConsole(deathLog);
+                }
             }
 
             // 步数归零 → 轮到下一个玩家行动
@@ -818,7 +832,7 @@ public class GameService {
     private void cleanupRoomData(String roomId) {
         playerDao.deleteByRoomId(roomId);
         gameDao.deleteById(roomId);
-        System.out.println("房间 " + roomId + " 已被彻底清理");
+        log.info("房间 " + roomId + " 已被彻底清理");
     }
 
     /**
@@ -852,10 +866,11 @@ public class GameService {
                 }
             }
             if (allInactive) {
-                toRemove.add(entry.getKey());
+                toRemove.add(entry.getKey()); //把这个房间的 ID 记到"待清理名单"里
             }
 
             // ---- 单个玩家断线检测（仅在游戏进行中，从DB读取最新lastActivity） ----
+            //判断是否写入"异常断开"日志到游戏日志面板
             if ("PLAYING".equals(room.getStatus())) {
                 for (Player p : room.getPlayers()) {
                     Player dbPlayer = playerDao.findById(p.getId());
@@ -864,9 +879,10 @@ public class GameService {
                     if (last == null) continue; // 跳过从未活动的玩家
                     long idle = System.currentTimeMillis() - last.getTime();
                     if (idle > disconnectThreshold) {
-                        if (!room.getDisconnectedLogged().contains(p.getId())) {
+                        if (!room.getDisconnectedLogged().contains(p.getId())) { //去重检查
                             room.addLog(p.getName() + " 异常断开");
                             logToConsole(p.getName() + " 异常断开");
+                            //把该玩家 ID 加入已记录集合，防止下次定时触发时重复刷屏"异常断开"
                             room.getDisconnectedLogged().add(p.getId());
                         }
                     } else {
@@ -898,9 +914,9 @@ public class GameService {
     private void logToConsole(String msg) {
         String ip = getClientIp();
         if (ip != null) {
-            System.out.println("[IP: " + ip + "] " + msg);
+            log.info("[IP: {}] {}", ip, msg);
         } else {
-            System.out.println("[无] " + msg);
+            log.info(msg);
         }
     }
 
@@ -920,10 +936,11 @@ public class GameService {
      */
     private String getClientIp() {
         try {
-            // 从Spring上下文中获取当前请求
+            // 非HTTP线程调用会抛异常
+            // 从Spring上下文中获取当前HTTP请求
             HttpServletRequest request = ((ServletRequestAttributes)
                     RequestContextHolder.currentRequestAttributes()).getRequest();
-            String ip = request.getHeader("X-Forwarded-For");     // 第1优先级：标准代理头
+            String ip = request.getHeader("X-Forwarded-For");     // 第1优先级：标准代理头Nginx
             if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
                 ip = request.getHeader("Proxy-Client-IP");        // 第2优先级：Apache代理
             }

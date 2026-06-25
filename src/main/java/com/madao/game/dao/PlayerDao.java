@@ -2,6 +2,8 @@ package com.madao.game.dao;
 
 import com.madao.game.entity.Player;
 import com.madao.game.util.DBUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.sql.*;
@@ -21,6 +23,8 @@ import java.util.List;
  */
 @Repository
 public class PlayerDao {
+
+    private static final Logger log = LoggerFactory.getLogger(PlayerDao.class);
 
     /**
      * 插入一条新玩家记录。
@@ -191,7 +195,7 @@ public class PlayerDao {
         try (Connection conn = DBUtil.getConnection();
              Statement stmt = conn.createStatement()) {
             int deleted = stmt.executeUpdate(sql);
-            System.out.println("已清理 player 表: " + deleted + " 条记录");
+            log.info("已清理 player 表: {} 条记录", deleted);
         } catch (SQLException e) {
             throw new RuntimeException("清空玩家表失败", e);
         }
