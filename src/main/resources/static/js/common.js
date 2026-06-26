@@ -7,6 +7,15 @@
  *   4. 聊天发送逻辑
  *
  * 依赖：需要全局变量 roomId、playerId 已在页面中通过 Thymeleaf 注入
+ * common.js 整体架构
+ *├── escapeHtml()           ← 安全层：XSS 防注入
+ *├── toggleRules()          ← 交互层：规则弹窗控制
+ *├── updatePlayers()        ← 渲染层：玩家卡片
+ *├── updateLogs()           ← 渲染层：操作日志（增量优化）
+ *├── updateChat()           ← 渲染层：聊天面板（增量优化）
+ *├── initChatForm()         ← 交互层：聊天发送（双请求）
+ *├── smartPoll()            ← 网络层：智能轮询+心跳
+ *└── createRoomPoller()     ← 网络层：轮询工厂（消除重复）
  * ============================================================ */
 
 // ========== HTML 转义函数（防 XSS） ==========
@@ -297,7 +306,8 @@ function smartPoll(fn, intervalMs) {
  *   2. 检查 room 是否存在 → 不存在跳首页
  *   3. 更新 UI（players/logs/chat）
  *   4. 根据状态/阶段判断是否跳转
- *
+ *   5. 设计意图：waiting.html、spectate.html、result.html 三个页面都需要定时拉取房间状态，且模式相同
+ *   （请求 → 检查 → 更新 UI → 判断跳转）。把共同逻辑抽出，差异部分通过 config 配置注入
  * @param {Object} config — 配置对象
  *   config.shouldRedirect(data)   — 返回 true 则跳转到 /game/{roomId}/{playerId}
  *   config.onUpdate(data)         — 自定义 UI 更新回调（在通用更新之后调用）

@@ -86,6 +86,18 @@
     </div>
 
     <a th:href="@{/leave/{roomId}/{playerId}(roomId=${roomId}, playerId=${playerId})}" class="back-link">返回首页</a>
+
+    <!-- ===== 聊天区域 ===== -->
+    <div class="chat-box">
+        <h4>💬 聊天</h4>
+        <div class="chat-scroll" id="chatScroll">
+            <ul id="chatList"></ul>
+        </div>
+        <form id="chatForm" class="chat-form">
+            <input type="text" id="chatInput" placeholder="输入消息..." required autocomplete="off" style="width:70%;">
+            <button type="submit">发送</button>
+        </form>
+    </div>
 </div>
 
 <!-- ========== 页面交互脚本 ========== -->
@@ -202,12 +214,14 @@
                          + '</li>';
             }
             document.getElementById('playersList').innerHTML = listHtml;
+            updateChat(data.chatMessages);
             restoreRulesPopup();
         } catch (e) { console.error('轮询失败', e); }
     }
 
     pollState();
     restoreRulesPopup();
+    initChatForm();
     smartPoll(pollState, 3000);
 </script>
 </body>

@@ -160,6 +160,8 @@ public class PlayerDao {
      * @param roomId 房间UUID
      */
     public void deleteByRoomId(String roomId) {
+        //DELETE FROM player — 从玩家表删除记录
+        //WHERE room_id = ? — 按房间 ID 匹配
         String sql = "DELETE FROM player WHERE room_id = ?";
         try (Connection conn = DBUtil.getConnection();             // 从连接池获取连接
              PreparedStatement ps = conn.prepareStatement(sql)) {

@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * 马刀游戏（MaDaoGame）—— Spring Boot 应用入口。
+ *马刀游戏（MaDaoGame）—— Spring Boot应用入口。
  *
  * <p>这是一个基于 Web 的多人回合制对战游戏，技术栈为：
  * Spring Boot 3.4.x + Thymeleaf 模板引擎 + H2 嵌入式数据库 + 原生 JDBC。</p>

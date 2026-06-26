@@ -144,6 +144,7 @@ public class GameController {
      * 显示房间内玩家列表、聊天消息，等待人满或房主开始游戏。
      * 访问时更新玩家 lastActivity（心跳）。
      */
+    //当用户访问 http://localhost:8080/lobby/{roomId}/{playerId} 时，调用下面这个 lobby() 方法。
     @GetMapping("/lobby/{roomId}/{playerId}") //说明了用户身份playerId和目的地roomId(某房间的等待大厅)
     public String lobby(@PathVariable String roomId, @PathVariable String playerId, Model model) {
         GameRoom room = gameService.getRoom(roomId);
@@ -161,7 +162,7 @@ public class GameController {
         if ("PLAYING".equals(room.getStatus())) {
             return "redirect:/game/" + roomId + "/" + playerId;
         }
-
+        //向 Thymeleaf 模板传递数据
         model.addAttribute("room", room);
         model.addAttribute("roomId", roomId);
         model.addAttribute("playerId", playerId);
@@ -322,10 +323,6 @@ public class GameController {
     /**
      * 【核心API】获取房间完整状态 —— 前端轮询此接口驱动游戏界面。
      *
-     * <h3>隐私注意</h3>
-     * <p>当前实现中所有玩家的 guess（猜拳手势）直接暴露给前端所有客户端。
-     * 如有保密需求，应在 players 列表构建时按请求者身份过滤 guess 字段。</p>
-     *
      * <h3>返回数据结构</h3>
      * <pre>
      * {
@@ -349,6 +346,7 @@ public class GameController {
      * @return 房间完整状态 Map，房间不存在返回空Map
      */
     @GetMapping("/api/room/{roomId}")
+    //告诉 Spring 将返回值（Map）直接序列化为 JSON 写入 HTTP 响应体，而不是跳转视图
     @ResponseBody
     public Map<String, Object> apiGetRoomState(@PathVariable String roomId,
                                                @RequestParam String playerId) {
@@ -372,6 +370,7 @@ public class GameController {
         result.put("playerCount", room.getPlayerCount());
 
         // ---------- 所有玩家列表（含隐藏信息如猜拳手势） ----------
+        //拿到房间里的所有玩家 List<Player>，开启流式处理，把每个 Player 对象转成一个 Map，填充 pm 的各个字段，返回组装好的 Map
         List<Map<String, Object>> playersJson = room.getPlayers().stream().map(p -> {
             Map<String, Object> pm = new HashMap<>();
             pm.put("id", p.getId());
@@ -383,9 +382,8 @@ public class GameController {
             pm.put("buff", p.isBuff());                    // 是否有血祭buff（伤害翻倍）
             pm.put("location", p.getLocation());
             pm.put("alive", p.isAlive());
-            pm.put("guess", p.getGuess());                 // 猜拳手势；注意：此实现直接暴露所有玩家的 guess 值到前端；
-                                                            // 若需保密（他人可见为 null），应在此处添加 requestPlayer 身份判断：
-                                                            // p.getId().equals(playerId) ? p.getGuess() : null
+            // 猜拳手势：仅对请求者本人暴露自己的手势，对其他玩家返回 null 以保密
+            pm.put("guess", p.getId().equals(playerId) ? p.getGuess() : null);
             // 在线判定：请求者自己刚发心跳肯定在线；其他玩家从DB读最新lastActivity避免过期内存误判
             boolean online;
             if (p.getId().equals(playerId)) {
@@ -396,7 +394,7 @@ public class GameController {
             }
             pm.put("online", online);
             return pm;
-        }).collect(Collectors.toList());
+        }).collect(Collectors.toList()); //把流中所有 Map 收集成一个 List<Map<String, Object>>，方便直接序列化为 JSON 返回给前端。
         result.put("players", playersJson);
 
         // ---------- 当前玩家视角数据 ----------

@@ -233,7 +233,10 @@ public class GameService {
             // ========== PLAYING / FINISHED 状态：游戏中，仅允许重连 ==========
             if ("PLAYING".equals(room.getStatus()) || "FINISHED".equals(room.getStatus())) {
                 if (existingPlayer == null) {
-                    throw new RuntimeException("该昵称不在房间中，无法重新加入"); // 杜绝新玩家加入进行中的游戏
+                    String msg = "PLAYING".equals(room.getStatus())
+                            ? "游戏已开始，该昵称的玩家不在房间中，无法加入"
+                            : "游戏已结束，该昵称的玩家不在房间中，无法查看结果";
+                    throw new RuntimeException(msg);
                 }
                 if (isPlayerOnline(existingPlayer)) {
                     throw new RuntimeException("该昵称的玩家当前在线，无法加入");

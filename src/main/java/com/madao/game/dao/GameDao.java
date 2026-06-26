@@ -49,12 +49,19 @@ public class GameDao {
      * @return 找到返回 GameRoom 对象，未找到返回 null
      */
     public GameRoom findById(String id) {
+        //SELECT * — 查询该行所有字段
+        //FROM game_room — 从房间表查
+        //WHERE id = ? — 按主键精确匹配
+        //? 是占位符（参数化查询），值在稍后通过 setString 填入，防止 SQL 注入
         String sql = "SELECT * FROM game_room WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
+            //ps.executeQuery() → 执行 SELECT 语句，返回一个 结果集游标
+            //ResultSet rs → 指向查询结果，初始时游标在第一行之前
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
+                    //查到房间了
                 GameRoom room = new GameRoom();
                 room.setId(rs.getString("id"));
                 room.setPlayerCount(rs.getInt("player_count"));
@@ -77,6 +84,12 @@ public class GameDao {
      * @param room 包含最新状态的 GameRoom 对象
      */
     public void updateStatus(GameRoom room) {
+        //更新 game_room 表
+        //SET status=?	设置 status 列 = 第 1 个占位符的值
+        //round=?	设置 round 列 = 第 2 个占位符的值
+        //phase=?	设置 phase 列 = 第 3 个占位符的值
+        //winner=?	设置 winner 列 = 第 4 个占位符的值
+        //WHERE id=?	限定条件：只更新 id 匹配的房间（第 5 个占位符）
         String sql = "UPDATE game_room SET status=?, round=?, phase=?, winner=? WHERE id=?";
         try (Connection conn = DBUtil.getConnection();             // try-with-resources 自动关闭连接
              PreparedStatement ps = conn.prepareStatement(sql)) {
