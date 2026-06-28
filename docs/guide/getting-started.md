@@ -49,7 +49,7 @@ java -jar target/madao-game-*.jar
 
 启动成功后，打开浏览器访问：
 
-> **http://localhost:8080**
+> `http://localhost:8080`
 
 你将看到游戏首页，可以创建或加入房间。
 
