@@ -5,7 +5,6 @@ export default withMermaid({
   description: '多人回合制网页对战游戏 - 技术文档',
   lang: 'zh-CN',
   base: '/MaDaoGame-Web/',
-  lastUpdated: true,
   cleanUrls: true,
 
   head: [
@@ -77,14 +76,7 @@ export default withMermaid({
 
     darkModeSwitchLabel: '主题',
     sidebarMenuLabel: '菜单',
-    returnToTopLabel: '回到顶部',
-    lastUpdated: {
-      text: '最后更新于',
-      formatOptions: {
-        dateStyle: 'short',
-        timeStyle: 'short'
-      }
-    }
+    returnToTopLabel: '回到顶部'
   },
 
   markdown: {
