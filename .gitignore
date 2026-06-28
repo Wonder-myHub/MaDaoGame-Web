@@ -30,9 +30,14 @@ bin/
 
 ### Maven ###
 target/
+node_modules
 
 ### VitePress ###
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 docs/.vitepress/temp/
 .vitepress/cache/
+
+### CodeBuddy ###
+.codebuddy/
+.workbuddy/
