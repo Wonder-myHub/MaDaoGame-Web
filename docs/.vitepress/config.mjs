@@ -1,7 +1,6 @@
-import { defineConfig } from 'vitepress'
-import { MermaidMarkdown, MermaidPlugin } from 'vitepress-plugin-mermaid'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default defineConfig({
+export default withMermaid({
   title: 'MaDaoGame 马刀游戏',
   description: '多人回合制网页对战游戏 - 技术文档',
   lang: 'zh-CN',
@@ -77,25 +76,10 @@ export default defineConfig({
 
     darkModeSwitchLabel: '主题',
     sidebarMenuLabel: '菜单',
-    returnToTopLabel: '回到顶部',
-
-  },
-
-  vite: {
-    plugins: [MermaidPlugin()],
-    optimizeDeps: {
-      include: ['mermaid']
-    }
+    returnToTopLabel: '回到顶部'
   },
 
   markdown: {
     lineNumbers: true,
-    config: (md) => {
-      MermaidMarkdown(md)
-    }
-  },
-
-  mermaid: {
-    theme: 'default'
   }
 })
