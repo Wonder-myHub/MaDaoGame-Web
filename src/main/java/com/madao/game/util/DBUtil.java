@@ -1,5 +1,6 @@
 package com.madao.game.util;
 
+import com.madao.game.exception.DatabaseException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -98,7 +99,7 @@ public class DBUtil {
             stmt.execute(createPlayer);
             log.info("数据库表已创建或已存在（HikariCP 连接池）");
         } catch (SQLException e) {
-            throw new RuntimeException("数据库建表失败", e);
+            throw new DatabaseException("数据库建表失败", e);
         }
     }
 
@@ -111,18 +112,4 @@ public class DBUtil {
         return dataSource.getConnection();
     }
 
-    /**
-     * 安全关闭数据库资源（Connection、Statement、ResultSet）。
-     * 每个资源独立 try-catch，某个关闭失败不影响其他资源的关闭。
-     * 注意：通过连接池获取的 Connection，close() 会归还到池中而非真正关闭。
-     *
-     * @param conn 数据库连接（可为 null）
-     * @param stmt Statement 对象（可为 null）
-     * @param rs   ResultSet 对象（可为 null）
-     */
-    public static void close(Connection conn, Statement stmt, ResultSet rs) {
-        try { if (rs != null) rs.close(); } catch (SQLException ignored) {}
-        try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
-        try { if (conn != null) conn.close(); } catch (SQLException ignored) {}
-    }
 }

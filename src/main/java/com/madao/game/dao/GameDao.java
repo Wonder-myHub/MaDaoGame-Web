@@ -1,6 +1,7 @@
 package com.madao.game.dao;
 
 import com.madao.game.entity.GameRoom;
+import com.madao.game.exception.DatabaseException;
 import com.madao.game.util.DBUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,7 +40,7 @@ public class GameDao {
             ps.setString(6, room.getWinner());        // 胜利者（初始为 null）
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new RuntimeException("插入房间记录失败", e);
+            throw new DatabaseException("插入房间记录失败", e);
         }
     }
 
@@ -73,7 +74,7 @@ public class GameDao {
             }
             }
         } catch (SQLException e) {
-            throw new RuntimeException("查询房间记录失败", e);
+            throw new DatabaseException("查询房间记录失败", e);
         }
         return null;  // 未找到对应房间
     }
@@ -100,7 +101,7 @@ public class GameDao {
             ps.setString(5, room.getId());                         // WHERE 条件：房间 UUID
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new RuntimeException("更新房间状态失败", e);
+            throw new DatabaseException("更新房间状态失败", e);
         }
     }
 
@@ -116,7 +117,7 @@ public class GameDao {
             ps.setString(1, id);                                   // 房间 UUID
             ps.executeUpdate();                                    // 执行删除
         } catch (SQLException e) {
-            throw new RuntimeException("删除房间记录失败", e);
+            throw new DatabaseException("删除房间记录失败", e);
         }
     }
 
@@ -132,7 +133,7 @@ public class GameDao {
             int deleted = stmt.executeUpdate(sql);
             log.info("已清理 game_room 表: {} 条记录", deleted);
         } catch (SQLException e) {
-            throw new RuntimeException("清空房间表失败", e);
+            throw new DatabaseException("清空房间表失败", e);
         }
     }
 }

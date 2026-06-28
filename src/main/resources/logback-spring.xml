@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ===== 玩家操作日志 Appender：简化格式，只有时间+消息 ===== -->
+    <appender name="PLAYER_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ===== 系统日志 Appender：完整格式，包含线程/级别/Logger名 ===== -->
+    <appender name="SYSTEM_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ===== GameService：玩家操作，使用简化格式，不向上传递 ===== -->
+    <logger name="com.madao.game.service.GameService" level="INFO" additivity="false">
+        <appender-ref ref="PLAYER_CONSOLE"/>
+    </logger>
+
+    <!-- ===== Root：系统信息，使用完整格式 ===== -->
+    <root level="INFO">
+        <appender-ref ref="SYSTEM_CONSOLE"/>
+    </root>
+
+</configuration>

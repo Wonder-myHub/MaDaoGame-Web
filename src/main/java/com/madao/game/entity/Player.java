@@ -71,8 +71,11 @@ public class Player {
     public int getHp() { return hp; }
     /**
      * 设置HP时自动钳制到不小于0，避免出现负数生命值。
-     * <p>当 HP 变为 0 时，自动将 alive 置为 false，确保两者在同一原子操作内同步，
-     * 消除 hp=0 但 alive=true 的不一致窗口。</p>
+     *
+     * @implNote 当 HP 降为 0 时，本方法会自动将 {@code alive} 置为 {@code false}，
+     *           这是一个<b>不可逆的副作用</b>。调用方无需手动设置存活状态，也<b>不应</b>
+     *           在调用本方法后再单独调用 {@code setAlive(true)} 来"复活"玩家。
+     * @param hp 新的生命值，负值会被钳制为 0
      */
     public void setHp(int hp) {
         this.hp = Math.max(hp, 0);

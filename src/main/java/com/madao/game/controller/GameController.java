@@ -4,7 +4,6 @@ import com.madao.game.dao.PlayerDao;
 import com.madao.game.entity.GameRoom;
 import com.madao.game.entity.Player;
 import com.madao.game.service.GameService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -61,13 +60,23 @@ import java.util.stream.Collectors;
 @Controller
 public class GameController {
 
+    /** 最小玩家数 */
+    private static final int MIN_PLAYER_COUNT = 2;
+    /** 玩家昵称最大长度 */
+    private static final int MAX_NAME_LENGTH = 20;
+    /** 聊天消息最大字符长度 */
+    private static final int MAX_CHAT_LENGTH = 500;
+
     /** 游戏核心服务，处理房间生命周期、猜拳判定、行动执行等业务逻辑 */
-    @Autowired
-    private GameService gameService;
+    private final GameService gameService;
 
     /** 玩家数据访问对象，API 层直接查询玩家数据（如在线判定、昵称查询） */
-    @Autowired
-    private PlayerDao playerDao;
+    private final PlayerDao playerDao;
+
+    public GameController(GameService gameService, PlayerDao playerDao) {
+        this.gameService = gameService;
+        this.playerDao = playerDao;
+    }
 
     // ==================================================================================
     //  页面路由
@@ -93,12 +102,12 @@ public class GameController {
      */
     @PostMapping("/create")
     public String create(@RequestParam int count, @RequestParam String name, Model model) {
-        if (count < 2) {
+        if (count < MIN_PLAYER_COUNT) {
             model.addAttribute("error", "玩家数量至少为2人");
             return "index";                                  // 校验失败，回首页
         }
         String trimmedName = name.trim(); //去掉用户输入昵称首尾的空白字符（空格、制表符、换行等）。
-        if (trimmedName.isEmpty() || trimmedName.length() > 20) {
+        if (trimmedName.isEmpty() || trimmedName.length() > MAX_NAME_LENGTH) {
             model.addAttribute("error", "昵称长度需在1-20个字符之间");
             return "index";
         }
@@ -120,7 +129,7 @@ public class GameController {
     @PostMapping("/join")
     public String join(@RequestParam String roomId, @RequestParam String name, Model model) {
         String trimmedName = name.trim();
-        if (trimmedName.isEmpty() || trimmedName.length() > 20) {
+        if (trimmedName.isEmpty() || trimmedName.length() > MAX_NAME_LENGTH) {
             model.addAttribute("error", "昵称长度需在1-20个字符之间");
             return "index";
         }
@@ -309,7 +318,7 @@ public class GameController {
             GameRoom room = gameService.getRoom(roomId);
             if (room != null) {
                 String msg = message.trim();
-                if (msg.length() > 500) msg = msg.substring(0, 500); // 截断超长消息
+                if (msg.length() > MAX_CHAT_LENGTH) msg = msg.substring(0, MAX_CHAT_LENGTH); // 截断超长消息
                 room.addChatMessage(player.getName() + "：" + msg);
             }
         }
@@ -496,7 +505,7 @@ public class GameController {
             GameRoom room = gameService.getRoom(roomId);
             if (room != null) {
                 String msg = message.trim();
-                if (msg.length() > 500) msg = msg.substring(0, 500); // 截断超长消息
+                if (msg.length() > MAX_CHAT_LENGTH) msg = msg.substring(0, MAX_CHAT_LENGTH); // 截断超长消息
                 room.addChatMessage(player.getName() + "：" + msg);
             }
         }

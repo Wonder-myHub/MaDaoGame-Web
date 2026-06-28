@@ -6,7 +6,6 @@ import com.madao.game.entity.GameRoom;
 import com.madao.game.entity.Player;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -86,12 +85,15 @@ public class GameService {
     private final Map<String, GameRoom> rooms = new ConcurrentHashMap<>();
 
     /** 玩家数据访问对象，读写玩家 HP/步数/装备/位置等属性变化 */
-    @Autowired
-    private PlayerDao playerDao;
+    private final PlayerDao playerDao;
 
     /** 房间数据访问对象，读写房间状态/回合/阶段变化 */
-    @Autowired
-    private GameDao gameDao;
+    private final GameDao gameDao;
+
+    public GameService(PlayerDao playerDao, GameDao gameDao) {
+        this.playerDao = playerDao;
+        this.gameDao = gameDao;
+    }
 
     /**
      * 启动时清理遗留数据。
@@ -100,7 +102,7 @@ public class GameService {
      * 会变成孤儿数据永久残留。因此在每次启动时清空两张表，保证干净的初始状态。</p>
      */
     @PostConstruct
-    public void initCleanup() {
+    public synchronized void initCleanup() {
         playerDao.deleteAll();
         gameDao.deleteAll();
         log.info("启动清理完成：已清除所有遗留的房间和玩家数据");
@@ -750,15 +752,31 @@ public class GameService {
      * 检查游戏是否结束。
      * 当存活玩家只剩1人时，设置游戏状态为 FINISHED 并记录胜利者。
      */
+    /**
+     * 检查游戏是否结束。
+     * 当存活玩家只剩1人时，调用 handleGameEnd() 处理结束逻辑。
+     */
     private void checkGameEnd(GameRoom room) {
         List<Player> alive = room.getAlivePlayers();
-        if (alive.size() == 1) {                             // 仅剩1人存活
-            room.setStatus("FINISHED");
-            room.setWinner(alive.get(0).getName());          // 最后存活者获胜
-            gameDao.updateStatus(room);
-            room.addLog("游戏结束，胜利者：" + alive.get(0).getName());
-            logToConsole("游戏结束，胜利者：" + alive.get(0).getName());
+        if (alive.size() == 1) {
+            handleGameEnd(room, alive.get(0).getName());
         }
+    }
+
+    /**
+     * 处理游戏结束逻辑：设置 FINISHED 状态、记录胜利者、持久化、输出日志。
+     * 由 checkGameEnd() 和 endRound() 统一调用，消除重复代码。
+     *
+     * @param room   游戏房间
+     * @param winner 胜利者昵称
+     */
+    private void handleGameEnd(GameRoom room, String winner) {
+        room.setStatus("FINISHED");
+        room.setWinner(winner);
+        gameDao.updateStatus(room);
+        String msg = "游戏结束，胜利者：" + winner;
+        room.addLog(msg);
+        logToConsole(msg);
     }
 
     /**
@@ -773,12 +791,7 @@ public class GameService {
     private void endRound(GameRoom room) {
         List<Player> alive = room.getAlivePlayers();
         if (alive.size() == 1) {
-            // 游戏结束
-            room.setStatus("FINISHED");
-            room.setWinner(alive.get(0).getName());
-            room.addLog("游戏结束，胜利者：" + alive.get(0).getName());
-            logToConsole("游戏结束，胜利者：" + alive.get(0).getName());
-            gameDao.updateStatus(room);
+            handleGameEnd(room, alive.get(0).getName());
         } else {
             // 进入下一回合
             alive.forEach(p -> {

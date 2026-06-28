@@ -1,6 +1,7 @@
 package com.madao.game.dao;
 
 import com.madao.game.entity.Player;
+import com.madao.game.exception.DatabaseException;
 import com.madao.game.util.DBUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +54,7 @@ public class PlayerDao {
                     : new Timestamp(System.currentTimeMillis()));
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new RuntimeException("插入玩家记录失败", e);
+            throw new DatabaseException("插入玩家记录失败", e);
         }
     }
 
@@ -87,7 +88,7 @@ public class PlayerDao {
             }
             }
         } catch (SQLException e) {
-            throw new RuntimeException("按房间ID查询玩家失败", e);
+            throw new DatabaseException("按房间ID查询玩家失败", e);
         }
         return list;
     }
@@ -121,7 +122,7 @@ public class PlayerDao {
             }
             }
         } catch (SQLException e) {
-            throw new RuntimeException("按玩家ID查询失败", e);
+            throw new DatabaseException("按玩家ID查询失败", e);
         }
         return null;  // 未找到对应玩家
     }
@@ -150,7 +151,7 @@ public class PlayerDao {
             ps.setString(10, player.getId());
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new RuntimeException("更新玩家状态失败", e);
+            throw new DatabaseException("更新玩家状态失败", e);
         }
     }
 
@@ -168,7 +169,7 @@ public class PlayerDao {
             ps.setString(1, roomId);                               // 房间 UUID，删除该房间所有玩家
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new RuntimeException("按房间ID删除玩家失败", e);
+            throw new DatabaseException("按房间ID删除玩家失败", e);
         }
     }
 
@@ -184,7 +185,7 @@ public class PlayerDao {
             ps.setString(1, playerId);                             // 玩家 UUID 主键
             ps.executeUpdate();                                    // 执行删除
         } catch (SQLException e) {
-            throw new RuntimeException("按玩家ID删除记录失败", e);
+            throw new DatabaseException("按玩家ID删除记录失败", e);
         }
     }
 
@@ -199,7 +200,7 @@ public class PlayerDao {
             int deleted = stmt.executeUpdate(sql);
             log.info("已清理 player 表: {} 条记录", deleted);
         } catch (SQLException e) {
-            throw new RuntimeException("清空玩家表失败", e);
+            throw new DatabaseException("清空玩家表失败", e);
         }
     }
 }
