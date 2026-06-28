@@ -30,3 +30,9 @@ bin/
 
 ### Maven ###
 target/
+
+### VitePress ###
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/.vitepress/temp/
+.vitepress/cache/
