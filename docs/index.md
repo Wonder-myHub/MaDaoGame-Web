@@ -6,7 +6,7 @@ hero:
   text: "马刀游戏"
   tagline: 多人回合制网页对战游戏 · Spring Boot + Thymeleaf + H2 构建
   image:
-    src: /public/project-overview-components.svg
+    src: /project-overview-components.svg
     alt: 系统架构图
   actions:
     - theme: brand
