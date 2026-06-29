@@ -1,0 +1,272 @@
+@startuml MaDaoGame-Web UML 类图
+' ============================================================
+' MaDaoGame-Web 完整 UML 设计图
+' 包含：类图、序列图（猜拳流程/行动流程/轮询跳转）、ER 图
+' 基于 Spring Boot 3.4.5 + JDK 25
+' ============================================================
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 10
+skinparam classFontSize 11
+skinparam classHeaderFontSize 12
+skinparam dpi 150
+
+skinparam class {
+    BorderColor #333333
+    BorderThickness 1.5
+    BackgroundColor #FAFAFA
+    HeaderBackgroundColor #E3F2FD
+    FontColor #222222
+    StereotypeFontSize 9
+}
+
+skinparam package {
+    BorderColor #999999
+    FontSize 12
+    FontStyle bold
+    BackgroundColor #F5F5F5
+}
+
+skinparam note {
+    BackgroundColor #FFFDE7
+    BorderColor #F9A825
+}
+
+skinparam sequence {
+    ArrowColor #333333
+    LifeLineBorderColor #666666
+    ParticipantBorderColor #333333
+    ParticipantBackgroundColor #E3F2FD
+}
+
+' ============================================================
+' PART 1: 类图（Class Diagram）
+' ============================================================
+
+title **MaDaoGame-Web 完整 UML 设计图**\nSpring Boot 3.4.5 多人在线回合制策略游戏
+
+' --- 包：com.madao.game ---
+package "com.madao.game" as root_pkg {
+  class MadaoGameApplication <<@SpringBootApplication\n@EnableScheduling>> {
+    {static} + main(String[] args) : void
+  }
+}
+
+' --- 包：com.madao.game.controller ---
+package "com.madao.game.controller" as ctrl_pkg #C8E6C9 {
+  class GameController <<@Controller>> {
+    - gameService : GameService
+    - playerDao : PlayerDao
+    ==
+    {static} + index() : String
+    {static} + create(int count, String name) : String
+    {static} + join(String roomId, String name) : String
+    {static} + lobby(String roomId, String playerId) : String
+    {static} + game(String roomId, String playerId) : String
+    {static} + guess(String roomId, String playerId, String gesture) : String
+    {static} + action(roomId, playerId, int actionType, targetId, city) : String
+    {static} + leave(String roomId, String playerId) : String
+    {static} + chat(String roomId, String playerId, String message) : String
+    {static} + apiGetRoomState(String roomId, String playerId) : Map
+    {static} + apiGuess(roomId, playerId, gesture) : Map
+    {static} + apiAction(roomId, playerId, int actionType, targetId, city) : Map
+    {static} + apiChat(roomId, playerId, message) : List
+    {static} + forceStartGame(String roomId, String playerId) : Map
+    - findPlayerInRoom(GameRoom room, String playerId) : Player
+    - buildAvailableActions(Player p, GameRoom r) : List
+    - createAction(int i, int type, String name) : Map
+    - hasOtherPlayerInSameLocation(Player self, GameRoom r) : boolean
+  }
+  note right of GameController
+    **8种行动可用性规则**
+    0 放弃 — 始终可用
+    1 移动 — 始终可用
+    2 买马 — !isHorse()
+    3 买刀 — !isKnife()
+    4 踢   — 城内+有马+同城有他人
+    5 刺   — 有刀+同位置有他人
+    6 血祭 — !isBuff() && HP>1
+    7 撵入 — 城外+同位置有他人
+  end note
+}
+
+' --- 包：com.madao.game.service ---
+package "com.madao.game.service" as svc_pkg #FFF9C4 {
+  class GameService <<@Service\n@DependsOn("DBUtil")>> {
+    - {static} log : Logger
+    - rooms : ConcurrentHashMap~String,GameRoom~
+    - random : Random
+    - playerDao : PlayerDao
+    - gameDao : GameDao
+    ==
+    + initCleanup() : void
+    + createRoom(int playerCount) : String
+    + joinRoom(String roomId, String playerName) : String
+    + isPlayerOnline(Player player) : boolean
+    + forceStartGame(String roomId, String playerId) : void
+    + getRoom(String roomId) : GameRoom
+    + submitGuess(String playerId, String gesture) : void
+    + executeAction(String playerId, int actionType, String targetId, String city) : String
+    + playerLeave(String roomId, String playerId) : void
+    + cleanupInactiveRooms() : void
+    - startGame(GameRoom room) : void
+    - processGuessResult(GameRoom room) : void
+    - findTargetInSameLocation(Player self, GameRoom r, String targetId) : Player
+    - checkGameEnd(GameRoom room) : void
+    - endRound(GameRoom room) : void
+    - cleanupRoomData(String roomId) : void
+    - logToConsole(String msg) : void
+    - getClientIp() : String
+  }
+
+  note right of GameService
+    **@PostConstruct** 启动时清理
+    initCleanup(): 清空 player+game_room 表
+    防止重启后数据库残留
+
+    **@Scheduled(fixedRate=5000)** 定时清理
+    · 所有玩家2分钟无活动 → 清理房间
+    · PLAYING状态玩家5秒无心跳 → 记录断线
+  end note
+}
+
+' --- 包：com.madao.game.entity ---
+package "com.madao.game.entity" as entity_pkg #FCE4EC {
+  class GameRoom <<POJO>> {
+    - {static} log : Logger
+    - id : String
+    - playerCount : int
+    - status : String = "WAITING"
+    - round : int = 0
+    - phase : String = "GUESS"
+    - winner : String
+    - players : CopyOnWriteArrayList~Player~
+    - actionQueue : Collections.synchronizedList~String~
+    - currentActionIndex : int = 0
+    - actionLogs : CopyOnWriteArrayList~String~
+    - chatMessages : CopyOnWriteArrayList~String~
+    - disconnectedLogged : ConcurrentHashMap.KeySetView~String~
+    ==
+    + getAlivePlayers() : List~Player~
+    + isCurrentPlayer(String playerId) : boolean
+    + nextPlayer() : void
+    + getPlayersNotGuessed() : List~String~
+    + getCurrentActionPlayerName() : String
+    + getCurrentActionPlayerSteps() : int
+    + addLog(String log) : void
+    + addLogQuiet(String log) : void
+    + addChatMessage(String msg) : void
+    + getDisconnectedLogged() : Set~String~
+    + <<getter/setter>> ×24
+  }
+
+  class Player <<POJO>> {
+    - id : String
+    - roomId : String
+    - name : String
+    - hp : int = 10
+    - steps : int = 0
+    - horse : boolean = false
+    - knife : boolean = false
+    - buff : boolean = false
+    - location : String
+    - alive : boolean = true
+    - guess : String
+    - lastActivity : Timestamp
+    ==
+    + setHp(int hp) : void
+    + <<getter/setter>> ×24
+  }
+  note right of Player
+    **setHp() 自动钳制+存活同步**
+    this.hp = Math.max(hp, 0)
+    if (this.hp <= 0) this.alive = false
+  end note
+}
+
+' --- 包：com.madao.game.dao ---
+package "com.madao.game.dao" as dao_pkg #E8EAF6 {
+  class GameDao <<@Repository>> {
+    + insert(GameRoom room) : void
+    + findById(String id) : GameRoom
+    + updateStatus(GameRoom room) : void
+    + deleteById(String id) : void
+    + deleteAll() : void
+  }
+
+  class PlayerDao <<@Repository>> {
+    + insert(Player player) : void
+    + findByRoomId(String roomId) : List~Player~
+    + findById(String id) : Player
+    + update(Player player) : void
+    + deleteByRoomId(String roomId) : void
+    + deleteById(String playerId) : void
+    + deleteAll() : void
+  }
+}
+
+' --- 包：com.madao.game.util ---
+package "com.madao.game.util" as util_pkg #F3E5F5 {
+  class DBUtil <<@Component>> {
+    - {static} log : Logger
+    - {static} dataSource : DataSource
+    ==
+    + setDataSource(DataSource ds) : void
+    + init() : void
+    + {static} getConnection() : Connection
+    + {static} close(Connection, Statement, ResultSet) : void
+    - createTablesIfNotExist() : void
+  }
+  note right of DBUtil
+    **@Autowired Setter注入**
+    同时赋值给静态字段
+    供静态方法使用
+
+    **@PostConstruct** 容器初始化后
+    init(): 自动建表
+    (CREATE TABLE IF NOT EXISTS)
+  end note
+}
+
+' ============================================================
+' 关系连线
+' ============================================================
+
+' Controller 依赖
+GameController ..> GameService : «@Autowired»
+GameController ..> PlayerDao : «@Autowired»
+
+' Service 依赖
+GameService ..> GameDao : «@Autowired»
+GameService ..> PlayerDao : «@Autowired»
+
+' Service 聚合 GameRoom（ConcurrentHashMap）
+GameService o--> GameRoom : rooms\n(Map~String,GameRoom~)
+
+' GameRoom 组合 Player（CopyOnWriteArrayList）
+GameRoom *--> Player : players\n(List~Player~)
+
+' DAO 静态调用 DBUtil
+GameDao ..> DBUtil : «static call»
+PlayerDao ..> DBUtil : «static call»
+
+' 启动关系
+MadaoGameApplication -[hidden]-> GameController : 启动
+
+' ============================================================
+' 图例
+' ============================================================
+legend right
+  |= 图例 |
+  | ..  虚线箭头 | 依赖（@Autowired） |
+  | ◇-- 空菱形 | 聚合（Aggregation） |
+  | ◆-- 实菱形 | 组合（Composition） |
+  | <#C8E6C9> </> | Controller 层 |
+  | <#FFF9C4> </> | Service 层 |
+  | <#E8EAF6> </> | DAO 层 |
+  | <#FCE4EC> </> | Entity 层 |
+  | <#F3E5F5> </> | Util 层 |
+endlegend
+
+@enduml

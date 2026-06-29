@@ -1,0 +1,2 @@
+# 运行所有静态扫描（SpotBugs + PMD + Checkstyle）
+mvn clean verify

@@ -1,0 +1,346 @@
+@startuml heartbeat-architecture
+' ========================================================================
+' 图1：心跳机制 — 架构总览 (Component Diagram)
+' 展示前端轮询层、Controller 心跳层、Service 检测层、数据层之间的组件关系
+' ========================================================================
+
+title 马刀游戏 — 心跳机制架构总览
+
+package "🖥 浏览器层 (各页面轮询间隔)" as BrowserLayer #LightYellow {
+    component [action.html\n(2s)] as actionPage
+    component [guess.html\n(2s)] as guessPage
+    component [waiting.html\n(3s)] as waitingPage
+    component [lobby.html\n(3s)] as lobbyPage
+    component [spectate.html\n(4s)] as spectatePage
+    component [result.html\n(5s)] as resultPage
+}
+
+package "📜 前端JS层 (common.js)" as JSLayer #LightBlue {
+    component [smartPoll(fn,ms)\n智能轮询] as smartPoll
+    component [visibilitychange\n监听器] as visibility
+    component [createRoomPoller\n工厂函数] as createPoller
+    component [updatePlayers\n渲染在线/断线标记] as updateUI
+}
+
+package "🌐 Controller 层 (心跳入口)" as ControllerLayer #LightGreen {
+    component [GET /api/room\napiGetRoomState()\n更新 lastActivity\n返回 online 状态] as apiRoom
+    component [GET /game\nPOST /join\nPOST /guess\nPOST /action] as otherAPI
+}
+
+package "⚙️ Service 层 (检测核心)" as ServiceLayer #LightCoral {
+    component [isPlayerOnline()\n在线判定\n阈值: 5秒] as onlineCheck
+    component [joinRoom()\n重连处理\n更新 lastActivity] as joinRoom
+    component [cleanupInactiveRooms()\n@Scheduled(5s)\n断线: 5秒 + 日志去重\n清理: 120秒全不活跃] as cleanupTask
+}
+
+package "💾 数据层 (持久化)" as DataLayer #Lavender {
+    database "H2 Database\ntables: player, game_room" as h2db
+    component [Player.java\nlastActivity: Timestamp\n↓ SQL 实时回读\n避免过期内存误判] as playerEntity
+    component [GameRoom.java\ndisconnectedLogged: Set\n↓ 断线日志去重\n↓ 避免定时任务重复刷屏] as roomEntity
+    component [PlayerDao\nfindById / update] as playerDao
+    component [GameDao] as gameDao
+}
+
+' --- 层间数据流 ---
+actionPage --> smartPoll
+guessPage --> smartPoll
+waitingPage --> smartPoll
+lobbyPage --> smartPoll
+spectatePage --> smartPoll
+resultPage --> smartPoll
+
+smartPoll --> visibility : 监听\n页面隐藏/恢复
+smartPoll --> createPoller : 每隔 intervalMs\n调用轮询函数
+createPoller --> apiRoom : GET /api/room/{roomId}\n?playerId={playerId}
+otherAPI --> apiRoom : 复用状态查询
+
+apiRoom --> onlineCheck : 调用 isPlayerOnline()\n判定其他玩家
+apiRoom --> playerDao : update(lastActivity)\n写入 H2 DB
+onlineCheck --> playerDao : findById()\n回读 DB 最新值
+
+joinRoom --> onlineCheck : 重连判定
+joinRoom --> playerDao : update(lastActivity)
+
+cleanupTask --> playerDao : findById()\n回读 DB 最新 lastActivity
+cleanupTask --> roomEntity : 读写 disconnectedLogged
+cleanupTask --> gameDao : 级联删除房间
+
+playerDao --> h2db
+gameDao --> h2db
+
+apiRoom --> updateUI : 返回 JSON\nplayers[].online
+updateUI --> actionPage : 渲染 (断线) 标记
+updateUI --> guessPage
+updateUI --> waitingPage
+updateUI --> lobbyPage
+updateUI --> spectatePage
+updateUI --> resultPage
+
+note bottom of onlineCheck
+  判定规则:
+  • lastActivity == null → 离线
+  • now - lastActivity > 5000ms → 离线
+  • 从 DB 读取 (非内存)
+  ==
+  心跳来源: 前端任何请求都会
+  触发 Controller 层更新 lastActivity
+end note
+
+note bottom of cleanupTask
+  定时任务 (fixedRate=5000):
+  1. 遍历 rooms map 中每个房间
+  2. 从 DB 回读每个玩家的 lastActivity
+  3. 单玩家断线 (PLAYING 中, idle>5s)
+     → 日志去重后写 "XXX 异常断开"
+  4. 全房间不活跃 (all idle>120s)
+     → 级联删除 DB + 内存
+end note
+
+@enduml
+
+' ========================================================================
+' 图2：心跳周期 — 时序图 (Sequence Diagram)
+' 完整展示从浏览器 poll 到后端更新 lastActivity 的全链路
+' ========================================================================
+
+@startuml heartbeat-cycle
+title 心跳周期时序图 — 正常在线 (以 action.html 2s 轮询为例)
+
+actor "🧑 玩家" as Player
+participant "浏览器\naction.html" as Browser
+participant "common.js\nsmartPoll" as SmartPoll
+participant "GameController\n/api/room" as Controller
+participant "GameService\nisPlayerOnline" as Service
+participant "PlayerDao" as Dao
+database "H2 DB" as DB
+
+== 初始加载 ==
+Player -> Browser : 打开 action 页面
+Browser -> SmartPoll : smartPoll(fetchState, 2000)\n启动 2 秒轮询
+SmartPoll -> SmartPoll : fetchState() 立即执行
+SmartPoll -> Controller : GET /api/room/{roomId}\n?playerId={playerId}
+
+Controller -> Controller : 在房间玩家列表中\n查找当前玩家
+Controller -> Controller : player.setLastActivity(now)\n[心跳核心: 更新时间戳]
+Controller -> Dao : playerDao.update(player)
+Dao -> DB : UPDATE player\nSET lastActivity = ?
+DB --> Dao : OK
+
+loop 对房间内每个其他玩家
+    Controller -> Dao : findById(otherPlayerId)
+    Dao -> DB : SELECT * FROM player WHERE id=?
+    DB --> Dao : Player (含 lastActivity)
+    Controller -> Service : isPlayerOnline(dbPlayer)
+    Service -> Service : now - lastActivity < 5000 ?
+    Service --> Controller : true/false
+end
+
+Controller --> SmartPoll : JSON { players: [{..., online: bool}] }
+SmartPoll -> Browser : updatePlayers(players)\n渲染玩家卡片
+Browser -> Browser : 若 online===false\n显示 🔴 (断线) 标记
+Browser -> Browser : updateLogs / updateChat
+Browser --> Player : 显示最新游戏状态
+
+== 第1次轮询 (2秒后) ==
+SmartPoll -> SmartPoll : setTimeout(2s) 到期
+SmartPoll -> Controller : GET /api/room/...\n[心跳请求]
+Controller -> Controller : lastActivity = now
+Controller -> Dao : update (写DB)
+note right : 每次轮询都更新 lastActivity\n保持在线状态
+
+== 页面切换到后台 (visibilitychange) ==
+Player -> Browser : 切到其他标签页
+SmartPoll -> SmartPoll : document.hidden === true
+SmartPoll -> Controller : 立即发送 1 次心跳\nGET /api/room/...
+Controller -> Controller : lastActivity = now\n[在定时器被限流前刷新]
+note right : 浏览器可能限流后台定时器\n所以在隐藏瞬间主动发送心跳
+
+== 后台期间 (页面隐藏) ==
+loop 每 2 秒 (如果浏览器未限流)
+    SmartPoll -> Controller : GET /api/room/...\n[仅心跳, 跳过 UI 刷新]
+    Controller -> Controller : lastActivity 持续更新
+    note right : document.hidden 时\n只发请求保持在线\n不执行 fn() 避开 UI 操作
+end
+
+== 页面恢复可见 ==
+Player -> Browser : 切回游戏标签页
+SmartPoll -> SmartPoll : visibilitychange\nhidden → visible
+SmartPoll -> SmartPoll : 立即执行 fn()
+SmartPoll -> Controller : GET /api/room/...\n[完整刷新: UI+心跳]
+Controller --> SmartPoll : 最新状态
+SmartPoll -> Browser : 更新所有 UI 组件
+Browser --> Player : 画面立即可用
+
+@enduml
+
+' ========================================================================
+' 图3：断线检测与房间清理 — 时序图 (Sequence Diagram)
+' 展示 @Scheduled 定时任务如何检测断线、记录日志、清理过期房间
+' ========================================================================
+
+@startuml disconnect-detection
+title 断线检测与房间清理时序图 (@Scheduled fixedRate=5000)
+
+participant "Spring\n@Scheduled" as Scheduler
+participant "GameService\ncleanupInactiveRooms()" as Service
+participant "PlayerDao" as Dao
+database "H2 DB" as DB
+participant "GameRoom\n(内存 Map)" as Room
+participant "GameDao" as GameDao
+
+== 定时触发 (每 5 秒) ==
+Scheduler -> Service : cleanupInactiveRooms()
+Service -> Service : inactiveThreshold = now - 120s\ndisconnectThreshold = 5000ms
+
+loop 遍历 rooms Map 中每个房间
+    Service -> Service : room = rooms.get(roomId)
+
+    ' ---- 检测1：全员不活跃 → 清理房间 ----
+    Service -> Service : allInactive = true
+    loop 检查房间内每个玩家
+        Service -> Dao : findById(playerId)
+        Dao -> DB : SELECT * FROM player WHERE id=?
+        DB --> Dao : Player (含 lastActivity)
+        Dao --> Service : dbPlayer
+        alt lastActivity != null &&\nlastActivity > inactiveThreshold
+            Service -> Service : allInactive = false\n(至少1人近期活跃)
+        end
+    end
+
+    alt allInactive == true
+        Service -> Service : toRemove.add(roomId)\n(全员 2 分钟无活动)
+        note left #FFB6C1 : 🔴 房间标记为待清理
+    end
+
+    ' ---- 检测2：单个玩家断线（仅 PLAYING 状态） ----
+    alt room.status == "PLAYING"
+        loop 检查每个玩家
+            Service -> Dao : findById(p.getId())
+            Dao -> DB : SELECT lastActivity FROM player
+            DB --> Dao : lastActivity
+            Service -> Service : idle = now - lastActivity
+
+            alt idle > 5000ms (5秒断线阈值)
+                Service -> Room : disconnectedLogged.contains(p.getId()) ?
+                alt 未记录过
+                    Service -> Room : addLog("XXX 异常断开")
+                    Service -> Room : disconnectedLogged.add(p.getId())
+                    note left #FFD700 : ⚠️ 写入断线日志 (仅1次)
+                else 已记录
+                    note left : 跳过, 防重复刷屏
+                end
+            else idle <= 5000ms (已恢复)
+                Service -> Room : disconnectedLogged.remove(p.getId())
+                note left #90EE90 : ✅ 玩家恢复, 清除断线标记
+            end
+        end
+    end
+end
+
+' ---- 批量清理 ----
+loop 遍历 toRemove 列表
+    Service -> Service : cleanupRoomData(rid)
+    Service -> GameDao : 删除房间相关数据
+    GameDao -> DB : DELETE FROM player WHERE room_id=?\nDELETE FROM game_room WHERE id=?
+    Service -> Room : rooms.remove(rid)
+    note left #FFB6C1 : 🗑️ 房间内存和DB数据全部清除
+end
+
+@enduml
+
+' ========================================================================
+' 图4：重连流程 — 活动图 (Activity Diagram)
+' 展示 joinRoom() 根据房间状态 + 在线判定决定允许/拒绝重连
+' ========================================================================
+
+@startuml reconnect-flow
+title 玩家重连流程 (joinRoom 完整决策树)
+
+start
+:浏览器 POST /join
+提交 roomId 和 nickname;
+
+if (房间是否存在?) is (否) then
+    :抛出异常
+    "房间不存在";
+    stop
+else (是)
+endif
+
+:从 DB 查找 roomId 下\n是否存在同名玩家;
+
+:锁定房间 (synchronized);
+
+if (房间状态?) then
+    ' ===== WAITING 状态 =====
+    #LightGreen:WAITING (等待中);
+    
+    if (同名玩家存在?) is (否) then
+        :正常加入流程\n创建新玩家、加入房间;
+        stop
+    else (是)
+        if (isPlayerOnline\n同名玩家在线?) is (是) then
+            :❌ 拒绝加入
+            抛出异常:
+            "该昵称的玩家当前在线，无法加入";
+            stop
+        else (否)
+            :✅ 重连!
+            
+            :更新 lastActivity = now
+            playerDao.update(existingPlayer);
+            
+            :同步内存中的玩家对象
+            
+            :添加日志
+            "XXX 重新连接";
+            
+            :返回 existingPlayer.getId()
+            跳转到对应页面;
+            stop
+        endif
+    endif
+    
+    ' ===== PLAYING / FINISHED 状态 =====
+    #LightCoral:PLAYING 或 FINISHED (游戏中);
+    
+    if (同名玩家存在于房间?) is (否) then
+        :❌ 拒绝加入
+        抛出异常:
+        "该昵称不在房间中，无法重新加入";
+        stop
+    else (是)
+        if (isPlayerOnline\n同名玩家在线?) is (是) then
+            :❌ 拒绝加入
+            抛出异常:
+            "该昵称的玩家当前在线，无法加入";
+            stop
+        else (否)
+            :✅ 重连!
+            
+            :更新 lastActivity = now
+            playerDao.update(existingPlayer);
+            
+            :同步内存中的玩家对象
+            
+            :添加日志
+            "XXX 重新连接";
+            
+            :返回 existingPlayer.getId();
+            
+            if (房间状态?) is (PLAYING)
+                :重定向到\n/game/{roomId}/{playerId};
+            else (FINISHED)
+                :重定向到结果页;
+            endif
+            stop
+        endif
+    endif
+    
+else (其他)
+    :抛出异常
+    "房间状态异常";
+    stop
+endif
+
+@enduml

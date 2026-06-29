@@ -1,0 +1,387 @@
+' ============================================================
+' project-overview.puml — MaDaoGame-Web 项目架构总览
+' ============================================================
+' PART 1: 组件总览图  |  PART 2: 房间状态机  |  PART 3: 部署拓扑图
+' 渲染：java -jar plantuml.jar -tsvg project-overview.puml
+' 产出：project-overview.svg, project-overview_001.svg, project-overview_002.svg
+' ============================================================
+
+@startuml
+' ============================================================
+' PART 1: 组件总览图 — 5层架构全景
+' ============================================================
+
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+
+title 组件总览图：MaDaoGame-Web 五层架构
+
+' --- 顶层: 浏览器 ---
+actor "浏览器" as Browser
+
+' --- 第1层: 启动层 ---
+package "启动层 (Boot)" as BootLayer #LightYellow {
+  component "MadaoGameApplication" as App {
+  }
+  note bottom of App
+    @SpringBootApplication
+    @EnableScheduling
+    入口: main() → SpringApplication.run()
+  end note
+}
+
+' --- 第2层: 控制层 ---
+package "控制层 (Controller)" as CtrlLayer #LightBlue {
+  component "GameController" as Ctrl {
+  }
+  note right of Ctrl
+    @Controller
+    == 页面路由 (Thymeleaf) ==
+    GET  /               → index.html
+    POST /create         → 创建房间
+    POST /join           → 加入房间
+    GET  /lobby/{r}/{p}  → lobby.html
+    GET  /game/{r}/{p}   → 模板分发
+    POST /guess          → 猜拳提交
+    POST /action         → 行动提交
+    GET  /leave          → 离开
+    POST /chat           → 聊天
+    == AJAX API (JSON) ==
+    GET  /api/room/{r}   → 房间状态
+    POST /api/guess      → 猜拳
+    POST /api/action     → 行动
+    POST /api/chat       → 聊天
+    POST /lobby/{r}/{p}/start → 强制开始
+  end note
+}
+
+' --- 第3层: 服务层 ---
+package "服务层 (Service)" as SrvLayer #LightGreen {
+  component "GameService" as Srv {
+  }
+  note bottom of Srv
+    @Service
+    @DependsOn("DBUtil")
+
+    == 核心职责 ==
+    createRoom()      创建房间(内存+DB)
+    joinRoom()        加入/重连
+    forceStart()      房主强制开始
+    submitGuess()     收集猜拳+判定
+    executeAction()   执行8种行动
+    checkGameEnd()    胜负判定
+    endRound()        回合结束
+
+    == 定时任务 ==
+    @PostConstruct initCleanup()
+      启动清空 player + game_room 表
+    @Scheduled(fixedRate=5000)
+      cleanupInactiveRooms()
+      清理2分钟无活动房间
+  end note
+}
+
+' --- 第4层: 数据访问层 ---
+package "数据访问层 (Dao)" as DaoLayer #LightSalmon {
+  component "GameDao" as GD {
+  }
+  note bottom of GD
+    @Repository
+    insert(method=init, sql=INSERT game_room)
+    findById(id) → GameRoom
+    updateStatus(id, status)
+    updatePhase(id, phase, round)
+    deleteById(id)
+    deleteAll()
+  end note
+
+  component "PlayerDao" as PD {
+  }
+  note bottom of PD
+    @Repository
+    insert(method=init, sql=INSERT player)
+    findById(id) → Player
+    findByRoomId(roomId) → List<Player>
+    update(player)
+    deleteById(id)
+    deleteByRoomId(roomId)
+    deleteAll()
+  end note
+}
+
+' --- 第5层: 工具/基础设施层 ---
+package "工具/基础设施层 (Infra)" as InfraLayer #Thistle {
+  component "DBUtil" as DBU {
+  }
+  note right of DBU
+    @Component
+    static DataSource dataSource
+    @Autowired setDataSource() 注入+静态赋值
+    @PostConstruct init() 自动建表
+    queryForList/Maps(sql)   静态查询
+    execute(sql)             静态执行
+  end note
+
+  database "HikariCP\n连接池" as Hikari {
+  }
+  note bottom of Hikari
+    minimum-idle=2
+    maximum-pool-size=10
+    idle-timeout=30000ms
+  end note
+
+  database "H2 文件数据库\n(madao_db.mv.db)" as H2 {
+  }
+  note bottom of H2
+    表1: game_room (id, player_count,
+         status, round, phase, winner)
+    表2: player (id, room_id FK, name,
+         hp, steps, horse, knife, buff,
+         location, alive, guess,
+         last_activity)
+  end note
+}
+
+' --- 内存存储 ---
+cloud "内存存储" as MemoryCache #LightCyan {
+  card "ConcurrentHashMap\n<String, GameRoom>" as CHM {
+  }
+  note bottom of CHM
+    并发安全读
+    rooms.compute() 写锁
+    双副本: DB优先→内存同步
+  end note
+}
+
+' --- 关系连线 ---
+Browser --> Ctrl : HTTP (GET/POST)\n页面请求 + AJAX API
+
+Ctrl --> Srv : @Autowired\n注入 GameService
+Srv --> CHM : rooms.compute()\n细粒度房间锁
+Srv --> GD : @Autowired\n读写房间状态
+Srv --> PD : @Autowired\n读写玩家状态
+
+GD --> DBU : static call\nDBUtil.execute/queryForList
+PD --> DBU : static call\nDBUtil.execute/queryForList
+
+DBU --> Hikari : DataSource\n管理连接
+Hikari --> H2 : JDBC\n查询/更新
+
+Srv ..> DBU : @DependsOn\n确保DBUtil先于Service初始化
+
+App --> Ctrl : @ComponentScan\n自动扫描注册
+App --> Srv : @ComponentScan
+App --> GD : @ComponentScan
+App --> PD : @ComponentScan
+App --> DBU : @ComponentScan
+
+legend right
+  **图例**
+  →  = @Autowired / 方法调用
+  ..> = 依赖声明 (@DependsOn)
+  ==== 分层边界
+
+  **5层架构**: 启动层 → 控制层 → 服务层 → 数据层 → 工具层
+  **3个存储**: 内存(ConcurrentHashMap) + 数据库(H2) + 静态资源
+  **双副本策略**: 写DB优先 → 同步内存
+  **并发模型**: ConcurrentHashMap + rooms.compute() 房间粒度锁
+endlegend
+@enduml
+
+@startuml
+' ============================================================
+' PART 2: 房间状态机图
+' ============================================================
+
+skinparam defaultFontName Microsoft YaHei
+
+title 房间生命周期状态机
+
+state "WAITING 等待玩家" as WAITING
+state "GUESS 猜拳阶段" as GUESS
+state "ACTION 行动阶段" as ACTION
+state "FINISHED 游戏结束" as FINISHED
+
+[*] --> WAITING : 创建房间 createRoom()
+
+WAITING --> GUESS : 人满/房主强制开始 forceStart() | HP=10 | 分配城市
+
+GUESS --> ACTION : 全部出拳+有胜负(恰好2种手势) | 胜方步数=败方人数
+
+GUESS --> GUESS : 平局(1或3种手势) | 清空guess | steps清零 | round++
+
+ACTION --> GUESS : actionQueue空+多人存活 | endRound() | phase=GUESS
+
+ACTION --> ACTION : 当前玩家行动后仍有actionQueue | nextPlayer()
+
+ACTION --> FINISHED : 仅剩1人存活 | checkGameEnd() | winner=存活者
+
+FINISHED --> [*] : 2分钟无活动 | cleanupInactiveRooms()
+
+note top of WAITING
+  玩家可在 WAITING 状态
+  自由加入/离开房间
+  大厅显示玩家列表+聊天
+end note
+
+note right of GUESS
+  **出拳规则**
+  石头 → 克剪刀
+  剪刀 → 克布
+  布   → 克石头
+
+  **判定算法 (processGuessResult)**
+  1. 去重统计手势种类
+  2. 种类 != 2 → 平局
+  3. 种类 = 2 → 胜方步数 = 败方人数
+end note
+
+note right of ACTION
+  **8种行动 (switch actionType)**
+  0 放弃 - 消耗1步
+  1 移动 - 城内↔城外
+  2 买马 - horse=true
+  3 买刀 - knife=true
+  4 踢   - 伤害3(buff*2=6)
+  5 刺   - 伤害1(buff*2=2)
+  6 血祭 - HP减半,buff=true
+  7 撵入 - 目标推入城市
+
+  **校验规则 (buildAvailableActions)**
+  始终可用: 0/1
+  条件可用: 2(!horse) 3(!knife)
+           4(城内+有马+同城他人)
+           5(有刀+同位置他人)
+           6(!buff+HP>1)
+           7(城外+同位置他人)
+end note
+
+legend bottom
+  **3种房间状态 x 2种子阶段 = 完整生命周期**
+  WAITING: 等待玩家 → 人满自动/房主强制 → GUESS阶段
+  GUESS ⇄ ACTION 循环直到只剩1人生存
+  FINISHED: 游戏结束 → 2分钟清理
+  所有状态变更在 rooms.compute() 中原子完成
+endlegend
+@enduml
+
+@startuml
+' ============================================================
+' PART 3: 部署拓扑图
+' ============================================================
+
+skinparam defaultFontName Microsoft YaHei
+
+title 部署拓扑图：运行时架构
+
+node "JVM 进程 (java -jar)" as JVM #LightYellow {
+
+  node "内嵌 Tomcat\n(spring-boot-starter-web)" as Tomcat {
+    portin " :8080" as Port
+  }
+
+  node "Spring ApplicationContext" as SpringCtx {
+
+    folder "Controller\nGameController" as CtrlDep {
+    }
+
+    folder "Service\nGameService" as SrvDep {
+    }
+
+    folder "Dao\nGameDao / PlayerDao" as DaoDep {
+    }
+
+    folder "Util\nDBUtil" as UtilDep {
+    }
+
+    database "HikariCP 连接池\n(min=2, max=10)" as HikariDep {
+    }
+  }
+
+  node "Thymeleaf 模板引擎" as Thymeleaf {
+    file "classpath:/templates/" as TmplDir {
+    }
+  }
+
+  node "@Scheduled 线程池" as Scheduled {
+  }
+}
+
+folder "静态资源 (classpath)" as StaticRes #LightCyan {
+  file "templates/" as TmplFiles {
+  }
+  file "static/css/common.css" as CSS
+  file "static/js/common.js" as JS
+}
+
+database "H2 文件数据库\n(项目根目录)" as H2Db #LightGreen {
+  file "madao_db.mv.db" as DBFile
+}
+
+node "浏览器" as ClientBrowser {
+}
+
+' --- 部署关系 ---
+Port --> ClientBrowser : 页面 + AJAX\n(JSON/text)
+
+Tomcat --> SpringCtx : DispatcherServlet\n请求分发
+
+CtrlDep --> SrvDep : @Autowired
+SrvDep --> DaoDep : @Autowired
+SrvDep ..> UtilDep : @DependsOn
+DaoDep --> UtilDep : static call
+UtilDep --> HikariDep : DataSource
+HikariDep --> H2Db : JDBC\n(jdbc:h2:file:./madao_db;AUTO_SERVER=TRUE)
+
+Thymeleaf --> TmplDir : 模板渲染
+CtrlDep --> Thymeleaf : ModelAndView
+Scheduled --> SrvDep : cleanupInactiveRooms()\n每5秒触发
+
+TmplFiles --> StaticRes : 包含
+
+note top of JVM
+  **启动命令**
+  mvn clean package
+  java -jar target/madao-game-1.0.0.jar
+
+  **主要依赖**
+  · Spring Boot 3.4.5
+  · JDK 25
+  · H2 嵌入式数据库
+  · HikariCP 连接池
+  · Thymeleaf 模板引擎
+end note
+
+note top of H2Db
+  **数据库特性**
+  · 嵌入式文件模式
+  · AUTO_SERVER=TRUE (多进程访问)
+  · 空密码 (开发环境)
+  · H2-Console: http://localhost:8080/h2-console
+end note
+
+note bottom of StaticRes
+  **前端资源 (19个文件)**
+  == templates/ (7个HTML) ==
+  index.html      - 首页(创建/加入)
+  lobby.html      - 等待大厅
+  guess.html      - 猜拳界面
+  action.html     - 行动界面
+  waiting.html    - 等待他人
+  spectate.html   - 观战模式
+  result.html     - 结果展示
+  fragments/rules.html - 规则说明
+  == static/ ==
+  css/common.css  - 全局样式
+  js/common.js    - 2秒轮询+smartPoll
+end note
+
+legend bottom
+  **运行时拓扑**
+  1 JVM进程 | 1 内嵌Tomcat | 1 Spring容器
+  8080端口 | HikariCP 2-10连接 | H2文件持久化
+  @Scheduled 独立线程池 | Thymeleaf 服务端渲染
+  smartPoll 2秒轮询 | XSS防护(location.href)
+endlegend
+@enduml
